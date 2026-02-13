@@ -2,7 +2,7 @@
 
 from .midi_buffer import RollingMidiBuffer, TimestampedMidiMsg
 from .aria_engine import AriaEngine
-from .ableton_bridge_engine import AbletonBridge
+from .bridge_engine import AbletonBridge
 
 __all__ = [
     "RollingMidiBuffer",

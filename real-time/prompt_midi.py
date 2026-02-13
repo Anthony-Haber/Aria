@@ -1,9 +1,8 @@
 """Convert rolling MIDI buffer to prompt format for Aria model."""
 
-import io
 import tempfile
 import time
-from typing import List, Tuple
+from typing import List
 
 try:
     from .midi_buffer import TimestampedMidiMsg

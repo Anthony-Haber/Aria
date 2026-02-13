@@ -1,4 +1,5 @@
+ariautils @ git+https://github.com/EleutherAI/aria-utils.git
 mido>=1.3.0
 python-rtmidi>=1.4.9
-torch>=2.0.0
 safetensors>=0.4.0
+torch>=2.0.0

@@ -2,31 +2,17 @@
 """
 Real-time Ableton bridge for Aria.
 
-Reads live MIDI from loopMIDI port "ARIA_IN", maintains a rolling prompt window,
-and generates continuations via Aria every ~200ms, sending to "ARIA_OUT".
+Reads live MIDI from loopMIDI port "ARIA_IN" and sends generated continuations
+to "ARIA_OUT", synchronized to Ableton's MIDI clock.
 
 Usage:
     python ableton_bridge.py --in ARIA_IN --out ARIA_OUT [--options]
-
-Options:
-    --in PORT_NAME          Input MIDI port (default: ARIA_IN)
-    --out PORT_NAME         Output MIDI port (default: ARIA_OUT)
-    --checkpoint PATH       Path to Aria checkpoint (default: aria-medium-gen)
-    --prompt_seconds        Rolling window (default: 4)
-    --tick_seconds          Generation interval (default: 0.2 = 200ms)
-    --horizon_seconds       Generation horizon (default: 0.6)
-    --temperature           Sampling temperature (default: 0.9)
-    --top_p                 Top-p sampling (default: 0.95)
-    --device                cuda or cpu (default: cuda)
 """
 
 import argparse
 import logging
-import math
 import os
 import sys
-import threading
-import time
 from pathlib import Path
 
 # Logging
@@ -211,18 +197,18 @@ def main():
         try:
             from .midi_buffer import RollingMidiBuffer
             from .aria_engine import AriaEngine
-            from .ableton_bridge_engine import AbletonBridge
+            from .bridge_engine import AbletonBridge
             from .tempo_tracker import TempoTracker
         except ImportError:
             from midi_buffer import RollingMidiBuffer
             from aria_engine import AriaEngine
-            from ableton_bridge_engine import AbletonBridge
+            from bridge_engine import AbletonBridge
             from tempo_tracker import TempoTracker
 
         logger.info(f"Connecting to ports: IN={args.in_port}, OUT={args.out_port}")
         logger.info(f"Checkpoint: {checkpoint_path}")
         logger.info(
-            f"Listen {args.listen_seconds}s → Generate {args.gen_seconds}s → "
+            f"Listen {args.listen_seconds}s -> Generate {args.gen_seconds}s -> "
             f"Cooldown {args.cooldown_seconds}s"
         )
         if args.clock_in:

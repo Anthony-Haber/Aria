@@ -81,6 +81,20 @@ Our embedding model was trained to capture composition-level and performance-lev
 
 In `demo/` we provide an MLX (Apple Silicon) implementation of the real-time interactive piano-continuation demo showcased in our release blog post. In order to use the demo, you must download the demo-specific model checkpoint which enhances the model to additionally control the sustain pedal ([direct-download](https://huggingface.co/loubb/aria-medium-base/resolve/main/model-demo.safetensors?download=true)).
 
+## Real-Time Ableton Integration
+
+The `real-time/` module provides a production-ready bridge between Ableton Live and Aria via MIDI. It listens to user input, generates measure-based responses, and supports configurable measure lengths for interactive performance workflows. This module has its own dependencies and setup steps.
+
+For setup and usage, navigate to `real-time/` and read `real-time/README.md`.
+
+Required tools (high level): Windows, Ableton Live, loopMIDI, Python; optional CUDA-capable GPU.
+
+Example:
+```bash
+cd real-time
+python ableton_bridge.py --device cuda --checkpoint "path/to/model.safetensors"
+```
+
 For our demonstration, we used an acoustic Yamaha Disklavier piano with simultaneous MIDI input and output ports connected via a standard MIDI interface. We disabled the built-in Disklavier playback mode, instead manually calibrating key-velocity latency to enhance responsiveness. You may recreate this in your own environment with our acoustic calibration settings, using the following script:
 
 ❗**NOTE**: It is vital that you use the `latency=off`/`realtime` Disklavier playback setting when using the provided configuration for `--hardware`.

@@ -5,8 +5,8 @@ import os
 import queue
 import threading
 import time
-import tempfile
 from typing import Optional
+
 logger = logging.getLogger(__name__)
 
 
@@ -213,7 +213,7 @@ class AbletonBridge:
         self.last_generation_time = time.time()
         self.failsafe_forced = False
 
-        # Asynchronous generation worker for MVP (1-bar-in → N-measures-out cycle)
+        # Asynchronous generation worker for MVP (1-bar-in -> N-measures-out cycle)
         self.gen_job_queue = queue.Queue()
         self.pending_ai_job = None  # Current job being processed
         self.pending_ai_response = None  # Path to N-measure MIDI when ready
@@ -571,7 +571,7 @@ class AbletonBridge:
 
     def _on_bar_boundary(self, finished_bar: int):
         """
-        MVP Cycle: N-bars-in → M-measures-out (both configurable)
+        MVP Cycle: N-bars-in -> M-measures-out (both configurable)
         
         PHASE_HUMAN:
         - Collect input for each bar (increment bars_collected_in_phase)
