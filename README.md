@@ -81,7 +81,7 @@ Our embedding model was trained to capture composition-level and performance-lev
 
 In `demo/` we provide an MLX (Apple Silicon) implementation of the real-time interactive piano-continuation demo showcased in our release blog post. In order to use the demo, you must download the demo-specific model checkpoint which enhances the model to additionally control the sustain pedal ([direct-download](https://huggingface.co/loubb/aria-medium-base/resolve/main/model-demo.safetensors?download=true)).
 
-## Real-Time Ableton Integration
+## Real-Time Ableton Integration (My Work)
 
 The `real-time/` module provides a production-ready bridge between Ableton Live and Aria via MIDI. It listens to user input, generates measure-based responses, and supports configurable measure lengths for interactive performance workflows. This module has its own dependencies and setup steps.
 
