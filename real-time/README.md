@@ -14,9 +14,8 @@ and sends the output back to Ableton in sync with MIDI clock.
 ## Installation
 ```powershell
 cd real-time
-python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+pip install -e "..[real-time]"
 ```
 
 ## Ableton Routing
@@ -29,6 +28,8 @@ pip install -r requirements.txt
 ```powershell
 python ableton_bridge.py --device cuda --checkpoint "C:\path\to\model.safetensors"
 ```
+
+To confirm GPU availability, run `python sanity.py` and verify CUDA is reported as available.
 
 ## CLI Options
 - `--in`: Input MIDI port name (default: `ARIA_IN`)
