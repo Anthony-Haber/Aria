@@ -34,7 +34,7 @@ To confirm GPU availability, run `python sanity.py` and verify CUDA is reported 
 ## CLI Options
 - `--in`: Input MIDI port name (default: `ARIA_IN`)
 - `--out`: Output MIDI port name (default: `ARIA_OUT`)
-- `--checkpoint`: Path to the `.safetensors` checkpoint (default: `aria-medium-gen`)
+- `--checkpoint`: Path to the `.safetensors` checkpoint (default: `aria-model-gen`)
 - `--listen_seconds`: Human listening window in seconds (default: 4.0)
 - `--gen_seconds`: Continuation duration in seconds (default: 1.0)
 - `--cooldown_seconds`: Cooldown after generation in seconds (default: 0.2)
@@ -47,6 +47,7 @@ To confirm GPU availability, run `python sanity.py` and verify CUDA is reported 
 - `--ticks_per_beat`: MIDI ticks per quarter note (default: 480)
 - `--temperature`: Sampling temperature (default: 0.9)
 - `--top_p`: Top-p sampling (default: 0.95)
+- `--min_p`: Min-p sampling threshold (default: None)
 - `--device`: `cuda` or `cpu` for inference (default: `cuda`)
 - `--list-ports`: List available MIDI ports and exit
 

@@ -84,8 +84,8 @@ def main():
     )
     parser.add_argument(
         "--checkpoint",
-        default="aria-medium-gen",
-        help="Path to Aria checkpoint (default: aria-medium-gen)",
+        default=r"C:\Code\Github Serious\Aria\models\model-gen.safetensors",
+        help="Path to Aria checkpoint (default: C:\\Code\\Github Serious\\Aria\\models\\model-gen.safetensors)",
     )
     parser.add_argument(
         "--listen_seconds",
@@ -157,6 +157,12 @@ def main():
         type=float,
         default=0.95,
         help="Top-p sampling (default: 0.95)",
+    )
+    parser.add_argument(
+        "--min_p",
+        type=float,
+        default=None,
+        help="Min-p sampling threshold (default: None)",
     )
     parser.add_argument(
         "--device",
@@ -250,6 +256,7 @@ def main():
             cooldown_seconds=args.cooldown_seconds,
             temperature=args.temperature,
             top_p=args.top_p,
+            min_p=args.min_p,
             quantize=args.quantize,
             ticks_per_beat=args.ticks_per_beat,
         )

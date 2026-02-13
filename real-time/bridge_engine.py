@@ -12,12 +12,22 @@ logger = logging.getLogger(__name__)
 
 class GenerationJob:
     """A job to generate music for a specific bar/bars."""
-    def __init__(self, bar_index: int, prompt_events: list, aria_engine, temperature: float, top_p: float, gen_bars: int = 2):
+    def __init__(
+        self,
+        bar_index: int,
+        prompt_events: list,
+        aria_engine,
+        temperature: float,
+        top_p: float,
+        min_p: float | None,
+        gen_bars: int = 2,
+    ):
         self.bar_index = bar_index  # Starting bar index
         self.prompt_events = prompt_events
         self.aria_engine = aria_engine
         self.temperature = temperature
         self.top_p = top_p
+        self.min_p = min_p
         self.gen_bars = gen_bars  # Number of measures to generate
         self.result_midi_path = None  # Set when generation completes
 
@@ -69,6 +79,7 @@ class GenerationWorker(threading.Thread):
                             horizon_s=horizon_s,
                             temperature=job.temperature,
                             top_p=job.top_p,
+                            min_p=job.min_p,
                         )
                         gen_time = time.time() - start_time
                         
@@ -129,6 +140,7 @@ class AbletonBridge:
         cooldown_seconds: float = 0.2,
         temperature: float = 0.8,
         top_p: float = 0.9,
+        min_p: float | None = None,
         quantize: bool = False,
         ticks_per_beat: int = 480,
     ):
@@ -162,6 +174,7 @@ class AbletonBridge:
         self.cooldown_seconds = cooldown_seconds
         self.temperature = temperature
         self.top_p = top_p
+        self.min_p = min_p
         self.quantize = quantize
         self.ticks_per_beat = ticks_per_beat
 
@@ -621,6 +634,7 @@ class AbletonBridge:
                     aria_engine=self.aria_engine,
                     temperature=self.temperature,
                     top_p=self.top_p,
+                    min_p=self.min_p,
                     gen_bars=self.gen_measures,  # Generate M measures per cycle
                 )
                 self.pending_ai_job = job
