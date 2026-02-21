@@ -15,6 +15,7 @@ import argparse
 import logging
 import os
 import sys
+import threading
 from pathlib import Path
 
 # Logging
@@ -242,6 +243,8 @@ def main():
             from .bridge_engine import AbletonBridge
             from .tempo_tracker import TempoTracker
             from .manual_mode import ManualModeSession
+            from .sampling_state import SamplingState
+            from .sampling_hotkeys import start_sampling_hotkeys
             import_mode = "package"
         except ImportError:
             from midi_buffer import RollingMidiBuffer
@@ -249,6 +252,8 @@ def main():
             from bridge_engine import AbletonBridge
             from tempo_tracker import TempoTracker
             from manual_mode import ManualModeSession
+            from sampling_state import SamplingState
+            from sampling_hotkeys import start_sampling_hotkeys
             import_mode = "script"
 
         logger.debug(f"Import mode: {import_mode}")
@@ -272,6 +277,15 @@ def main():
             config_name="medium",
         )
 
+        # Shared sampling state + hotkeys
+        sampling_state = SamplingState(
+            temperature=args.temperature,
+            top_p=args.top_p,
+            min_p=args.min_p if args.min_p is not None else 0.0,
+        )
+        hotkey_stop = threading.Event()
+        start_sampling_hotkeys(sampling_state, hotkey_stop)
+
         if args.mode == "manual":
             session = ManualModeSession(
                 in_port_name=args.in_port,
@@ -279,17 +293,17 @@ def main():
                 aria_engine=engine,
                 manual_key=args.manual_key,
                 ticks_per_beat=args.ticks_per_beat,
-                temperature=args.temperature,
-                top_p=args.top_p,
-                min_p=args.min_p,
                 gen_seconds=args.gen_seconds,
                 max_seconds=args.max_seconds,
                 max_bars=args.max_bars,
                 beats_per_bar=args.beats_per_bar,
                 max_new_tokens=args.max_new_tokens,
                 play_key=args.play_key,
+                sampling_state=sampling_state,
             )
-            return session.run()
+            rc = session.run()
+            hotkey_stop.set()
+            return rc
 
         # CLOCK MODE (existing behavior)
         buffer = RollingMidiBuffer(window_seconds=args.listen_seconds)
@@ -313,6 +327,7 @@ def main():
             midi_buffer=buffer,
             aria_engine=engine,
             tempo_tracker=tempo_tracker,
+            sampling_state=sampling_state,
             clock_in=args.clock_in,
             measures=args.measures,
             beats_per_bar=args.beats_per_bar,
@@ -327,6 +342,7 @@ def main():
         )
 
         bridge.run()
+        hotkey_stop.set()
         return 0
 
     except Exception as e:

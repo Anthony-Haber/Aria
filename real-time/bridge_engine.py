@@ -17,17 +17,13 @@ class GenerationJob:
         bar_index: int,
         prompt_events: list,
         aria_engine,
-        temperature: float,
-        top_p: float,
-        min_p: float | None,
+        sampling_state,
         gen_bars: int = 2,
     ):
         self.bar_index = bar_index  # Starting bar index
         self.prompt_events = prompt_events
         self.aria_engine = aria_engine
-        self.temperature = temperature
-        self.top_p = top_p
-        self.min_p = min_p
+        self.sampling_state = sampling_state
         self.gen_bars = gen_bars  # Number of measures to generate
         self.result_midi_path = None  # Set when generation completes
 
@@ -71,15 +67,16 @@ class GenerationWorker(threading.Thread):
                     # Call Aria to generate N bars
                     start_time = time.time()
                     try:
+                        temp, top_p, min_p = job.sampling_state.get_values()
                         # Horizon in seconds: gen_bars * 1.0s per bar (roughly)
                         horizon_s = job.gen_bars * 1.0
                         midi_path = job.aria_engine.generate(
                             prompt_midi_path=prompt_midi_path,
                             prompt_duration_s=4,
                             horizon_s=horizon_s,
-                            temperature=job.temperature,
-                            top_p=job.top_p,
-                            min_p=job.min_p,
+                            temperature=temp,
+                            top_p=top_p,
+                            min_p=min_p,
                         )
                         gen_time = time.time() - start_time
                         
@@ -138,9 +135,7 @@ class AbletonBridge:
         gen_measures: Optional[int] = None,
         human_measures: int = 1,
         cooldown_seconds: float = 0.2,
-        temperature: float = 0.8,
-        top_p: float = 0.9,
-        min_p: float | None = None,
+        sampling_state=None,
         quantize: bool = False,
         ticks_per_beat: int = 480,
     ):
@@ -172,9 +167,7 @@ class AbletonBridge:
         self.human_measures = human_measures  # Number of measures to collect before generating
 
         self.cooldown_seconds = cooldown_seconds
-        self.temperature = temperature
-        self.top_p = top_p
-        self.min_p = min_p
+        self.sampling_state = sampling_state
         self.quantize = quantize
         self.ticks_per_beat = ticks_per_beat
 
@@ -632,9 +625,7 @@ class AbletonBridge:
                     bar_index=finished_bar,
                     prompt_events=prompt_events,
                     aria_engine=self.aria_engine,
-                    temperature=self.temperature,
-                    top_p=self.top_p,
-                    min_p=self.min_p,
+                    sampling_state=self.sampling_state,
                     gen_bars=self.gen_measures,  # Generate M measures per cycle
                 )
                 self.pending_ai_job = job

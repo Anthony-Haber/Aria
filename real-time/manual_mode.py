@@ -138,24 +138,19 @@ class ManualModeSession:
         aria_engine,
         manual_key: str = "r",
         ticks_per_beat: int = 480,
-        temperature: float = 0.9,
-        top_p: float = 0.95,
-        min_p: Optional[float] = None,
         gen_seconds: float = 1.0,
         max_seconds: Optional[float] = None,
         max_bars: Optional[int] = None,
         beats_per_bar: int = 4,
         max_new_tokens: Optional[int] = None,
         play_key: Optional[str] = None,
+        sampling_state=None,
     ):
         self.in_port_name = in_port_name
         self.out_port_name = out_port_name
         self.aria_engine = aria_engine
         self.manual_key = manual_key
         self.ticks_per_beat = ticks_per_beat
-        self.temperature = temperature
-        self.top_p = top_p
-        self.min_p = min_p
         self.gen_seconds = gen_seconds
         self.max_seconds = max_seconds
         self.max_bars = max_bars
@@ -163,6 +158,7 @@ class ManualModeSession:
         self.max_new_tokens = max_new_tokens
         self.play_key = play_key
         self.play_toggle = KeyboardToggle(play_key) if play_key else None
+        self.sampling_state = sampling_state
 
         self.cancel_event = threading.Event()
         self.recording_flag = threading.Event()
@@ -320,13 +316,14 @@ class ManualModeSession:
                 )
 
                 gen_start = time.time()
+                temp, top_p, min_p = self.sampling_state.get_values() if self.sampling_state else (None, None, None)
                 generated_path = self.aria_engine.generate(
                     prompt_midi_path=prompt_midi_path,
                     prompt_duration_s=max(1, int(duration)),
                     horizon_s=self.gen_seconds,
-                    temperature=self.temperature,
-                    top_p=self.top_p,
-                    min_p=self.min_p,
+                    temperature=temp if temp is not None else 0.9,
+                    top_p=top_p if top_p is not None else 0.95,
+                    min_p=min_p,
                     max_new_tokens=self.max_new_tokens,
                 )
                 gen_time = time.time() - gen_start
