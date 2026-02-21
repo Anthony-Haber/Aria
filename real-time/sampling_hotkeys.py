@@ -56,17 +56,17 @@ def _listener_loop(sampling_state, stop_event: threading.Event):
 
 def _maybe_handle(key: str, sampling_state):
     if key == "2":
-        val = sampling_state.increase_temperature()
+        sampling_state.increase_temperature()
     elif key == "1":
-        val = sampling_state.decrease_temperature()
+        sampling_state.decrease_temperature()
     elif key == "4":
-        val = sampling_state.increase_top_p()
+        sampling_state.increase_top_p()
     elif key == "3":
-        val = sampling_state.decrease_top_p()
+        sampling_state.decrease_top_p()
     elif key == "6":
-        val = sampling_state.increase_min_p()
+        sampling_state.increase_min_p()
     elif key == "5":
-        val = sampling_state.decrease_min_p()
+        sampling_state.decrease_min_p()
     else:
         return
     t, tp, mp = sampling_state.get_values()

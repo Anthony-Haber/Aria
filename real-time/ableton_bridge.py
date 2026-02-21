@@ -16,6 +16,7 @@ import logging
 import os
 import sys
 import threading
+import queue
 from pathlib import Path
 
 # Logging
@@ -212,6 +213,11 @@ def main():
         default=None,
         help="Manual mode: optional keyboard key to arm playback of generated MIDI (defaults to auto-play).",
     )
+    parser.add_argument(
+        "--ui",
+        action="store_true",
+        help="Launch optional Tkinter UI panel for live control/status",
+    )
 
     args = parser.parse_args()
 
@@ -243,8 +249,9 @@ def main():
             from .bridge_engine import AbletonBridge
             from .tempo_tracker import TempoTracker
             from .manual_mode import ManualModeSession
-            from .sampling_state import SamplingState
+            from .sampling_state import SamplingState, SessionState
             from .sampling_hotkeys import start_sampling_hotkeys
+            from .ui_panel import run_ui
             import_mode = "package"
         except ImportError:
             from midi_buffer import RollingMidiBuffer
@@ -252,8 +259,9 @@ def main():
             from bridge_engine import AbletonBridge
             from tempo_tracker import TempoTracker
             from manual_mode import ManualModeSession
-            from sampling_state import SamplingState
+            from sampling_state import SamplingState, SessionState
             from sampling_hotkeys import start_sampling_hotkeys
+            from ui_panel import run_ui
             import_mode = "script"
 
         logger.debug(f"Import mode: {import_mode}")
@@ -285,6 +293,9 @@ def main():
         )
         hotkey_stop = threading.Event()
         start_sampling_hotkeys(sampling_state, hotkey_stop)
+        session_state = SessionState(mode=args.mode)
+        cmd_queue = queue.Queue()
+        log_queue = queue.Queue()
 
         if args.mode == "manual":
             session = ManualModeSession(
@@ -300,10 +311,24 @@ def main():
                 max_new_tokens=args.max_new_tokens,
                 play_key=args.play_key,
                 sampling_state=sampling_state,
+                command_queue=cmd_queue if args.ui else None,
+                log_queue=log_queue if args.ui else None,
+                session_state=session_state if args.ui else None,
             )
-            rc = session.run()
-            hotkey_stop.set()
-            return rc
+            if args.ui:
+                session_thread = threading.Thread(target=session.run, daemon=True)
+                session_thread.start()
+                try:
+                    run_ui(sampling_state, session_state, cmd_queue, log_queue, stop_event=hotkey_stop)
+                finally:
+                    hotkey_stop.set()
+                    session.cancel_event.set()
+                    session_thread.join(timeout=2)
+                return 0
+            else:
+                rc = session.run()
+                hotkey_stop.set()
+                return rc
 
         # CLOCK MODE (existing behavior)
         buffer = RollingMidiBuffer(window_seconds=args.listen_seconds)
@@ -341,9 +366,18 @@ def main():
             ticks_per_beat=args.ticks_per_beat,
         )
 
-        bridge.run()
-        hotkey_stop.set()
-        return 0
+        if args.ui:
+            bridge_thread = threading.Thread(target=bridge.run, daemon=True)
+            bridge_thread.start()
+            try:
+                run_ui(sampling_state, session_state, cmd_queue, log_queue, stop_event=hotkey_stop)
+            finally:
+                hotkey_stop.set()
+            return 0
+        else:
+            bridge.run()
+            hotkey_stop.set()
+            return 0
 
     except Exception as e:
         logger.exception(f"Fatal error: {e}")

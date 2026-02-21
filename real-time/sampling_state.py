@@ -49,3 +49,25 @@ class SamplingState:
     def get_values(self):
         with self._lock:
             return self.temperature, self.top_p, self.min_p
+
+
+class SessionState:
+    """Thread-safe session status and last output path."""
+
+    def __init__(self, mode: str = "manual"):
+        self._lock = threading.Lock()
+        self.status = "IDLE"
+        self.mode = mode
+        self.last_output_path = None
+
+    def set_status(self, status: str):
+        with self._lock:
+            self.status = status
+
+    def set_last_output(self, path: str | None):
+        with self._lock:
+            self.last_output_path = path
+
+    def get_snapshot(self):
+        with self._lock:
+            return {"mode": self.mode, "status": self.status, "last_output_path": self.last_output_path}

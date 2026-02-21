@@ -1,58 +1,63 @@
 # Real-Time Ableton Bridge (Aria)
 
-A compact real-time MIDI bridge between Ableton Live and Aria.
-It reads live input from a loopMIDI port, generates continuations with Aria,
-and sends the output back to Ableton in sync with MIDI clock.
+Live MIDI bridge between Ableton/loopMIDI and the Aria model.
 
-## Requirements
-- Windows
-- Python 3.11+
-- Ableton Live
-- loopMIDI
-- Optional: NVIDIA GPU with CUDA (recommended)
-
-## Installation
+## Quick start
 ```powershell
 cd real-time
-.\.venv\Scripts\Activate.ps1
-pip install -e "..[real-time]"
+python ableton_bridge.py --mode manual --in ARIA_IN --out ARIA_OUT
 ```
 
-## Ableton Routing
-- Create loopMIDI ports: `ARIA_IN`, `ARIA_OUT`, `ARIA_CLOCK`
-- In Ableton MIDI preferences, enable **Sync** for `ARIA_CLOCK`
-- Route your keyboard/track output to `ARIA_IN`
-- Route the generated output from `ARIA_OUT` to your instrument track
-
-## Run
+Optional UI panel:
 ```powershell
-python ableton_bridge.py --device cuda --checkpoint "C:\path\to\model.safetensors"
+python ableton_bridge.py --mode manual --ui --manual-key r --play-key p --in ARIA_IN --out ARIA_OUT
 ```
 
-To confirm GPU availability, run `python sanity.py` and verify CUDA is reported as available.
+## Common CLI flags
+- `--mode {clock,manual}`: Bridge mode (`clock` default).
+- `--in`, `--out`: MIDI input/output port names.
+- `--clock_in`: MIDI clock port (default `ARIA_CLOCK`) for clock mode.
+- `--checkpoint`: Path to model checkpoint (`.safetensors`).
+- `--listen_seconds`: Human listen window (clock mode buffer).
+- `--gen_seconds`: Generation horizon (seconds).
+- `--cooldown_seconds`: Cooldown after generation.
+- `--measures`, `--beats_per_bar`, `--gen_measures`, `--human_measures`: Bar-based settings (clock mode).
+- `--quantize`: Quantize generated output to 1/16 grid.
+- `--ticks_per_beat`: MIDI PPQ (default 480).
+- `--temperature`, `--top_p`, `--min_p`: Sampling params (live adjustable via hotkeys 1–6).
+- `--max-new-tokens`: Override token budget.
+- `--manual-key`: Keyboard toggle for record start/stop (manual mode).
+- `--play-key`: Keyboard to trigger playback of last generation.
+- `--max-seconds`, `--max-bars`: Safety caps for recording (manual).
+- `--ui`: Launch optional Tkinter panel.
+- `--list-ports`: List available MIDI ports and exit.
+- `--device {cuda,cpu}`: Inference device (default cuda).
 
-## CLI Options
-- `--in`: Input MIDI port name (default: `ARIA_IN`)
-- `--out`: Output MIDI port name (default: `ARIA_OUT`)
-- `--checkpoint`: Path to the `.safetensors` checkpoint (default: `aria-model-gen`)
-- `--listen_seconds`: Human listening window in seconds (default: 4.0)
-- `--gen_seconds`: Continuation duration in seconds (default: 1.0)
-- `--cooldown_seconds`: Cooldown after generation in seconds (default: 0.2)
-- `--clock_in`: MIDI clock input port (default: `ARIA_CLOCK`)
-- `--measures`: Measures per human/model block (default: 2)
-- `--beats_per_bar`: Time signature numerator (default: 4)
-- `--gen_measures`: Measures to generate (default: same as `--measures`)
-- `--human_measures`: Human measures to collect before generating (default: 1)
-- `--quantize`: Quantize generated output to 1/16 grid (default: off)
-- `--ticks_per_beat`: MIDI ticks per quarter note (default: 480)
-- `--temperature`: Sampling temperature (default: 0.9)
-- `--top_p`: Top-p sampling (default: 0.95)
-- `--min_p`: Min-p sampling threshold (default: None)
-- `--device`: `cuda` or `cpu` for inference (default: `cuda`)
-- `--list-ports`: List available MIDI ports and exit
+## Keyboard & hotkeys
+- Record toggle: `r` (manual mode)
+- Play last: `p` (when `--play-key` or UI enabled)
+- Sampling tweaks (terminal & UI):  
+  `1/2` temp -/+ , `3/4` top_p -/+ , `5/6` min_p -/+
+
+## File layout (real-time/)
+- `ableton_bridge.py` – CLI entrypoint & wiring
+- `bridge_engine.py` – clock-mode orchestration
+- `manual_mode.py` – manual record/generate/play loop
+- `sampling_state.py` – shared sampling + session state
+- `sampling_hotkeys.py` – non-blocking hotkeys
+- `ui_panel.py` – optional Tkinter control panel (main-thread)
+- Helpers: `midi_buffer.py`, `prompt_midi.py`, `clock_grid.py`, `tempo_tracker.py`, `aria_engine.py`
+
+## Requirements
+- Windows, Python 3.11+, loopMIDI, Ableton Live
+- Optional: NVIDIA GPU with CUDA
+
+## Ableton routing
+- Create loopMIDI ports: `ARIA_IN`, `ARIA_OUT`, `ARIA_CLOCK`
+- In Ableton MIDI prefs, enable **Sync** for `ARIA_CLOCK`
+- Route keyboard/track -> `ARIA_IN`; route `ARIA_OUT` to your instrument track
 
 ## Troubleshooting
-- **Ports not found**: Run `python ableton_bridge.py --list-ports` and verify loopMIDI ports exist.
-- **CUDA unavailable**: Install a CUDA-enabled PyTorch build or run with `--device cpu`.
-- **Checkpoint missing**: Provide an absolute path to the checkpoint file.
-- **No output in Ableton**: Verify `ARIA_OUT` is selected as the input and monitoring is enabled.
+- Ports missing: `python ableton_bridge.py --list-ports`
+- CUDA missing: use `--device cpu`
+- Checkpoint missing: pass full path with `--checkpoint`
