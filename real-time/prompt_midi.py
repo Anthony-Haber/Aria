@@ -220,10 +220,12 @@ def buffer_to_tempfile_midi(
                 first_timestamp = windowed_msgs[0].timestamp
                 last_tick = 0
                 sorted_msgs = sorted(windowed_msgs, key=lambda m: m.timestamp)
+                seconds_per_beat = 60.0 / current_bpm if current_bpm else 0.5  # default 120 BPM
+                ticks_per_second = ticks_per_beat / seconds_per_beat
 
                 for msg in sorted_msgs:
-                    relative_ms = (msg.timestamp - first_timestamp) * 1000
-                    tick = int(relative_ms * (ticks_per_beat / 500.0))  # Normalize to ticks_per_beat
+                    relative_seconds = (msg.timestamp - first_timestamp)
+                    tick = int(relative_seconds * ticks_per_second)
                     delta = max(0, tick - last_tick)
 
                     if msg.msg_type == 'note_on' and msg.velocity and msg.velocity > 0:

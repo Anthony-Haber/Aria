@@ -129,7 +129,8 @@ class AriaEngine:
             # Conservative: 1 token/ms => 600 tokens for 0.6s, but we cap it smaller
             if max_new_tokens is None:
                 # Very conservative for low-latency: ~2-4 tokens per 100ms
-                max_new_tokens = min(128, int(horizon_s * 200))
+                # User-requested upper cap bumped from 128 -> 512
+                max_new_tokens = min(512, int(horizon_s * 200))
 
             max_new_tokens = min(8096 - len(prompt), max_new_tokens)
 

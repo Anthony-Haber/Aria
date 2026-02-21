@@ -7,6 +7,8 @@ to "ARIA_OUT", synchronized to Ableton's MIDI clock.
 
 Usage:
     python ableton_bridge.py --in ARIA_IN --out ARIA_OUT [--options]
+    # Manual, keyboard-triggered recording (no Ableton clock required):
+    python ableton_bridge.py --mode manual --manual-key r --in ARIA_IN --out ARIA_OUT
 """
 
 import argparse
@@ -175,6 +177,40 @@ def main():
         action="store_true",
         help="List available MIDI ports and exit",
     )
+    parser.add_argument(
+        "--mode",
+        choices=["clock", "manual"],
+        default="clock",
+        help="Bridge mode: 'clock' uses Ableton MIDI clock (default), 'manual' uses keyboard start/stop",
+    )
+    parser.add_argument(
+        "--manual-key",
+        default="r",
+        help="Keyboard key to start/stop recording in manual mode (default: r)",
+    )
+    parser.add_argument(
+        "--max-seconds",
+        type=float,
+        default=None,
+        help="Manual mode: optional safety timeout to stop recording after N seconds",
+    )
+    parser.add_argument(
+        "--max-bars",
+        type=int,
+        default=None,
+        help="Manual mode: optional safety timeout expressed in bars (requires tempo inference)",
+    )
+    parser.add_argument(
+        "--max-new-tokens",
+        type=int,
+        default=None,
+        help="Override token budget for generation (otherwise derived from --gen_seconds; higher = longer/more detail)",
+    )
+    parser.add_argument(
+        "--play-key",
+        default=None,
+        help="Manual mode: optional keyboard key to arm playback of generated MIDI (defaults to auto-play).",
+    )
 
     args = parser.parse_args()
 
@@ -205,11 +241,17 @@ def main():
             from .aria_engine import AriaEngine
             from .bridge_engine import AbletonBridge
             from .tempo_tracker import TempoTracker
+            from .manual_mode import ManualModeSession
+            import_mode = "package"
         except ImportError:
             from midi_buffer import RollingMidiBuffer
             from aria_engine import AriaEngine
             from bridge_engine import AbletonBridge
             from tempo_tracker import TempoTracker
+            from manual_mode import ManualModeSession
+            import_mode = "script"
+
+        logger.debug(f"Import mode: {import_mode}")
 
         logger.info(f"Connecting to ports: IN={args.in_port}, OUT={args.out_port}")
         logger.info(f"Checkpoint: {checkpoint_path}")
@@ -217,23 +259,46 @@ def main():
             f"Listen {args.listen_seconds}s -> Generate {args.gen_seconds}s -> "
             f"Cooldown {args.cooldown_seconds}s"
         )
-        if args.clock_in:
-            logger.info(f"MIDI Clock input: {args.clock_in}")
+        if args.mode == "manual":
+            logger.info("Manual mode selected: keyboard-driven recording without MIDI clock.")
+        else:
+            if args.clock_in:
+                logger.info(f"MIDI Clock input: {args.clock_in}")
 
-        # Create components
-        buffer = RollingMidiBuffer(window_seconds=args.listen_seconds)
+        # Create shared engine
         engine = AriaEngine(
             checkpoint_path=checkpoint_path,
             device=args.device,
             config_name="medium",
         )
-        
+
+        if args.mode == "manual":
+            session = ManualModeSession(
+                in_port_name=args.in_port,
+                out_port_name=args.out_port,
+                aria_engine=engine,
+                manual_key=args.manual_key,
+                ticks_per_beat=args.ticks_per_beat,
+                temperature=args.temperature,
+                top_p=args.top_p,
+                min_p=args.min_p,
+                gen_seconds=args.gen_seconds,
+                max_seconds=args.max_seconds,
+                max_bars=args.max_bars,
+                beats_per_bar=args.beats_per_bar,
+                max_new_tokens=args.max_new_tokens,
+                play_key=args.play_key,
+            )
+            return session.run()
+
+        # CLOCK MODE (existing behavior)
+        buffer = RollingMidiBuffer(window_seconds=args.listen_seconds)
+
         # Start tempo tracker only if NOT using clock_in (they conflict on same MIDI port)
         tempo_tracker = None
         if args.clock_in:
             logger.info(f"Using ClockGrid on '{args.clock_in}'; disabling TempoTracker (port conflict)")
         else:
-            # Legacy: use tempo tracker without grid
             if args.clock_in:
                 try:
                     tempo_tracker = TempoTracker(clock_port_name=args.clock_in)

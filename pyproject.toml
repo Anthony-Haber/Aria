@@ -11,35 +11,39 @@ requires-python = ">=3.11"
 
 dependencies = [
     "ariautils @ git+https://github.com/EleutherAI/aria-utils.git",
-    "torch @ file:///C:/Code/Github%20Serious/Aria/wheels/torch-2.5.1+cu121-cp311-cp311-win_amd64.whl; platform_system == \"Windows\"",
-    "torch>=2.3; platform_system != \"Windows\"",
-    "mlx; platform_system == \"Darwin\" and platform_machine == \"arm64\"",
     "safetensors>=0.4.0",
     "jsonlines",
     "tqdm",
+    # IMPORTANT: torch is intentionally NOT pinned to a local wheel path.
+    # Let users install the correct build (CPU/CUDA) via official PyTorch instructions.
+    "torch>=2.3",
+    "mlx; platform_system == \"Darwin\" and platform_machine == \"arm64\"",
 ]
 
 [project.optional-dependencies]
 dev = ["black"]
 train = ["accelerate"]
-real-time = ["mido>=1.3.0", "python-rtmidi>=1.4.9"]
+
+real-time = [
+    "mido>=1.3.0",
+    "python-rtmidi>=1.4.9",
+]
+
 eval = [
     "transformers",
-    "torchaudio @ file:///C:/Code/Github%20Serious/Aria/wheels/torchaudio-2.5.1+cu121-cp311-cp311-win_amd64.whl; platform_system == \"Windows\"",
-    "torchvision @ file:///C:/Code/Github%20Serious/Aria/wheels/torchvision-0.20.1+cu121-cp311-cp311-win_amd64.whl; platform_system == \"Windows\"",
-    "torchaudio; platform_system != \"Windows\"",
-    "torchvision; platform_system != \"Windows\"",
+    "torchaudio>=2.3",
+    "torchvision>=0.18",
     "mido>=1.3.0",
 ]
+
 demo = ["python-rtmidi"]
+
 all = [
     "black",
     "accelerate",
     "transformers",
-    "torchaudio @ file:///C:/Code/Github%20Serious/Aria/wheels/torchaudio-2.5.1+cu121-cp311-cp311-win_amd64.whl; platform_system == \"Windows\"",
-    "torchvision @ file:///C:/Code/Github%20Serious/Aria/wheels/torchvision-0.20.1+cu121-cp311-cp311-win_amd64.whl; platform_system == \"Windows\"",
-    "torchaudio; platform_system != \"Windows\"",
-    "torchvision; platform_system != \"Windows\"",
+    "torchaudio>=2.3",
+    "torchvision>=0.18",
     "mido>=1.3.0",
     "python-rtmidi>=1.4.9",
 ]
