@@ -15,12 +15,8 @@ import time
 import queue
 from typing import Iterable, List, Optional, Tuple
 
-try:
-    from .midi_buffer import TimestampedMidiMsg
-    from .prompt_midi import buffer_to_tempfile_midi
-except Exception:  # pragma: no cover - fallback for script execution
-    from midi_buffer import TimestampedMidiMsg
-    from prompt_midi import buffer_to_tempfile_midi
+from core.midi_buffer import TimestampedMidiMsg
+from core.prompt_midi import buffer_to_tempfile_midi
 
 logger = logging.getLogger(__name__)
 

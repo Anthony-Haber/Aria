@@ -264,28 +264,28 @@ def main():
 
     # Import and start bridge
     try:
-        # Handle both module and script execution
+        # Handle both module and script execution (with new directory structure)
         try:
-            from .midi_buffer import RollingMidiBuffer
-            from .aria_engine import AriaEngine
-            from .bridge_engine import AbletonBridge
-            from .tempo_tracker import TempoTracker
-            from .manual_mode import ManualModeSession
-            from .sampling_state import SamplingState, SessionState
-            from .sampling_hotkeys import start_sampling_hotkeys
-            from .ui_panel import run_ui
-            from .osc_controller import OscController
+            from .core.midi_buffer import RollingMidiBuffer
+            from .core.aria_engine import AriaEngine
+            from .core.bridge_engine import AbletonBridge
+            from .core.tempo_tracker import TempoTracker
+            from .core.sampling_state import SamplingState, SessionState
+            from .modes.manual_mode import ManualModeSession
+            from .modes.sampling_hotkeys import start_sampling_hotkeys
+            from .modes.osc_controller import OscController
+            from .ui.ui_panel import run_ui
             import_mode = "package"
         except ImportError:
-            from midi_buffer import RollingMidiBuffer
-            from aria_engine import AriaEngine
-            from bridge_engine import AbletonBridge
-            from tempo_tracker import TempoTracker
-            from manual_mode import ManualModeSession
-            from sampling_state import SamplingState, SessionState
-            from sampling_hotkeys import start_sampling_hotkeys
-            from ui_panel import run_ui
-            from osc_controller import OscController
+            from core.midi_buffer import RollingMidiBuffer
+            from core.aria_engine import AriaEngine
+            from core.bridge_engine import AbletonBridge
+            from core.tempo_tracker import TempoTracker
+            from core.sampling_state import SamplingState, SessionState
+            from modes.manual_mode import ManualModeSession
+            from modes.sampling_hotkeys import start_sampling_hotkeys
+            from modes.osc_controller import OscController
+            from ui.ui_panel import run_ui
             import_mode = "script"
 
         logger.debug(f"Import mode: {import_mode}")

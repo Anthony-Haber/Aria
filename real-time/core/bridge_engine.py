@@ -7,6 +7,8 @@ import threading
 import time
 from typing import Optional
 
+from .prompt_midi import buffer_to_tempfile_midi
+
 logger = logging.getLogger(__name__)
 
 
@@ -53,11 +55,6 @@ class GenerationWorker(threading.Thread):
                     logger.info(f"[gen_worker] Starting generation for bar {job.bar_index} ({job.gen_bars} bars)")
                     
                     # Build prompt MIDI
-                    try:
-                        from .prompt_midi import buffer_to_tempfile_midi
-                    except Exception:
-                        from prompt_midi import buffer_to_tempfile_midi
-                    
                     prompt_midi_path = buffer_to_tempfile_midi(
                         job.prompt_events,
                         window_seconds=0,
@@ -233,10 +230,7 @@ class AbletonBridge:
             self._setup_midi_ports()
             # Start clock grid if requested
             if self.clock_in:
-                try:
-                    from .clock_grid import ClockGrid
-                except Exception:
-                    from clock_grid import ClockGrid
+                from ..modes.clock_mode import ClockGrid
 
                 self.clock_grid = ClockGrid(clock_port_name=self.clock_in, measures=self.measures, beats_per_bar=self.beats_per_bar)
                 # Do NOT register boundary callback; we use anchor-based boundary detection in _generation_loop
@@ -573,8 +567,6 @@ class AbletonBridge:
                 logger.debug("[service] Reset bars_collected_in_phase for next cycle")
             self.phase = self.PHASE_HUMAN
             self.model_end_pulse = None
-
-    # _on_anchor_boundary deprecated: use _on_bar_boundary instead
 
     def _on_bar_boundary(self, finished_bar: int):
         """
