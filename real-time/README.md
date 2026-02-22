@@ -427,5 +427,3 @@ For issues, feature requests, or contributions:
 - Review logs for detailed error messages.
 
 ---
-
-**Enjoy creating music with Aria!** 🎵
