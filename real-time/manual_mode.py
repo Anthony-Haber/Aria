@@ -121,6 +121,10 @@ class ManualModeSession:
         command_queue: Optional[queue.Queue] = None,
         log_queue: Optional[queue.Queue] = None,
         session_state=None,
+        osc_status_cb=None,
+        osc_log_cb=None,
+        osc_params_cb=None,
+        play_gate: bool = False,
     ):
         self.in_port_name = in_port_name
         self.out_port_name = out_port_name
@@ -132,12 +136,22 @@ class ManualModeSession:
         self.max_bars = max_bars
         self.beats_per_bar = beats_per_bar
         self.max_new_tokens = max_new_tokens
-        self.play_key = play_key
-        self.play_toggle = KeyboardToggle(play_key) if play_key else None
+        # Default play key to 'p' so manual playback always available (even if flag omitted).
+        self.play_key = play_key or "p"
+        self.play_toggle = KeyboardToggle(self.play_key)
         self.sampling_state = sampling_state
         self.command_queue = command_queue
         self.log_queue = log_queue
         self.session_state = session_state
+        self.osc_status_cb = osc_status_cb
+        self.osc_log_cb = osc_log_cb
+        self.osc_params_cb = osc_params_cb
+        # Gate playback to explicit PLAY command/key to keep manual + OSC paths consistent.
+        self.play_gate = True
+        self.pending_output_path = None
+        self._msg_count = 0
+        self._note_on_count = 0
+        self.state = "IDLE"
 
         self.cancel_event = threading.Event()
         self.recording_flag = threading.Event()
@@ -188,6 +202,9 @@ class ManualModeSession:
                         data["control"] = msg.control
                         data["value"] = msg.value
                     self.recorded.append(TimestampedMidiMsg(**data))
+                    self._msg_count += 1
+                    if msg.type == "note_on" and getattr(msg, "velocity", 0) > 0:
+                        self._note_on_count += 1
                 time.sleep(0.001)
         except Exception as e:
             logger.exception(f"Manual MIDI loop error: {e}")
@@ -197,7 +214,13 @@ class ManualModeSession:
         self.midi_thread = threading.Thread(target=self._midi_loop, daemon=True)
         self.midi_thread.start()
 
-    def _drain_commands(self, stop_key_event: threading.Event):
+    def _drain_commands(
+        self,
+        stop_key_event: Optional[threading.Event] = None,
+        start_event: Optional[threading.Event] = None,
+        play_event: Optional[threading.Event] = None,
+        play_callback=None,
+    ):
         if not self.command_queue:
             return
         try:
@@ -205,26 +228,73 @@ class ManualModeSession:
                 cmd, payload = self.command_queue.get_nowait()
                 if cmd == "toggle_record":
                     if self.recording_flag.is_set():
-                        stop_key_event.set()
+                        if stop_key_event:
+                            stop_key_event.set()
                     else:
-                        self._start_immediate_record(stop_key_event)
+                        if start_event:
+                            start_event.set()
+                        else:
+                            self._log_ui("Record start ignored (not armed)")
+                elif cmd == "record":
+                    if payload:
+                        if not self.recording_flag.is_set():
+                            if start_event:
+                                start_event.set()
+                            else:
+                                self._log_ui("Record start ignored (not armed)")
+                    else:
+                        if stop_key_event:
+                            stop_key_event.set()
+                elif cmd == "record_start":
+                    if self.recording_flag.is_set():
+                        self._log_ui("Already recording; record_start ignored")
+                    else:
+                        if start_event:
+                            start_event.set()
+                        else:
+                            self._log_ui("Record start ignored (not armed)")
+                elif cmd == "record_stop":
+                    if not self.recording_flag.is_set():
+                        self._log_ui("Not recording; record_stop ignored")
+                    elif stop_key_event:
+                        stop_key_event.set()
+                elif cmd == "cancel":
+                    if stop_key_event:
+                        stop_key_event.set()
+                    self.recorded.clear()
+                    self._log_ui("Recording canceled")
+                    if self.session_state:
+                        self.session_state.set_status("IDLE")
+                        self.session_state.has_pending_output = False
                 elif cmd == "play_last":
                     if self.session_state and self.session_state.last_output_path and self.out_port:
                         self._log_ui("Playing last output (UI)")
                         _play_midi_file(self.session_state.last_output_path, self.out_port)
+                elif cmd == "play":
+                    if play_event:
+                        play_event.set()
+                    elif play_callback:
+                        play_callback()
+                    else:
+                        self._handle_play_request()
                 self.command_queue.task_done()
         except queue.Empty:
             pass
 
-    def _start_immediate_record(self, stop_key_event: threading.Event):
+    def _start_immediate_record(self, stop_key_event: Optional[threading.Event] = None):
         if self.recording_flag.is_set():
             return
         self.recorded.clear()
+        self._msg_count = 0
+        self._note_on_count = 0
         self.recording_flag.set()
         self.start_time = time.monotonic()
         if self.session_state:
             self.session_state.set_status("RECORDING")
         self._log_ui("Recording started (UI)")
+        if stop_key_event is None:
+            return
+
         def _wait_stop():
             while not self.cancel_event.is_set():
                 try:
@@ -236,10 +306,208 @@ class ManualModeSession:
                     continue
         threading.Thread(target=_wait_stop, daemon=True).start()
 
+    def _handle_play_request(self) -> bool:
+        """Play pending output in a single shared path (keyboard + OSC)."""
+        if not self.play_gate:
+            return False
+        path = self.pending_output_path or (self.session_state.last_output_path if self.session_state else None)
+        if not path:
+            self._log_ui("No pending output to play")
+            logger.info("[manual] Play requested but no pending output.")
+            return False
+        if not self.out_port:
+            logger.warning("[manual] Play requested but output port is unavailable.")
+            return False
+        self._log_ui("Play requested")
+        sent, total = _play_midi_file(path, self.out_port)
+        logger.info(f"[manual] Played pending MIDI ({sent} msgs, {total:.2f}s)")
+        if self.osc_log_cb:
+            self.osc_log_cb(f"Played pending MIDI ({sent} msgs, {total:.2f}s)")
+        try:
+            os.unlink(path)
+        except Exception:
+            pass
+        self.pending_output_path = None
+        if self.session_state:
+            self.session_state.has_pending_output = False
+            self.session_state.set_status("IDLE")
+            self.session_state.set_last_output(None)
+        if self.osc_status_cb:
+            self.osc_status_cb("IDLE")
+        return True
+
+    def _wait_for_play(self):
+        """Block until either manual 'p' or OSC /aria/play arrives, then play once."""
+        play_event = threading.Event()
+
+        def _wait_keyboard_play():
+            prompt = f"Output ready. Press '{self.play_key}' to play."
+            if self.play_toggle.wait_for_press(prompt, self.cancel_event):
+                play_event.set()
+
+        threading.Thread(target=_wait_keyboard_play, daemon=True).start()
+
+        while not self.cancel_event.is_set():
+            self._drain_commands(play_event=play_event)
+            if play_event.is_set():
+                self._handle_play_request()
+                break
+            time.sleep(0.05)
+        # Ensure we leave READY state even if canceled without playback.
+        if self.cancel_event.is_set() and self.session_state:
+            self.session_state.has_pending_output = False
+            self.session_state.set_status("IDLE")
+            self.session_state.set_last_output(None)
+            self.pending_output_path = None
+
+    def _begin_recording(self):
+        """Shared start logic for keyboard + OSC."""
+        self.recorded.clear()
+        self._msg_count = 0
+        self._note_on_count = 0
+        self.recording_flag.set()
+        self.start_time = time.monotonic()
+        logger.info(f"[manual] Recording started at {self.start_time:.3f}")
+        self._log_ui("Recording started")
+        if self.session_state:
+            self.session_state.set_status("RECORDING")
+            self.session_state.set_recording(True)
+        if self.osc_status_cb:
+            self.osc_status_cb("RECORDING")
+
+    def _finish_recording_and_generate(self):
+        """Stop, generate, and arm playback (prompting for 'p')."""
+        self.recording_flag.clear()
+        self.stop_time = time.monotonic()
+        duration = (self.stop_time - self.start_time) if self.start_time else 0.0
+        logger.info(f"[manual] Recording stopped at {self.stop_time:.3f} (duration={duration:.2f}s)")
+        self._log_ui(f"Recording stopped (events={self._msg_count}, note_on={self._note_on_count})")
+        if self.session_state:
+            self.session_state.set_status("GENERATING")
+            self.session_state.set_recording(False)
+        if self.osc_status_cb:
+            self.osc_status_cb("GENERATING")
+
+        if not self.recorded:
+            logger.warning("[manual] No MIDI captured. Nothing to generate.")
+            self._log_ui("No MIDI captured. Check Ableton routing/monitor on ARIA_IN or competing readers.")
+            if self.session_state:
+                self.session_state.set_status("IDLE")
+                self.session_state.has_pending_output = False
+            if self.osc_status_cb:
+                self.osc_status_cb("IDLE")
+            return
+
+        bpm = infer_bpm_from_onsets(self.recorded)
+        if bpm:
+            logger.info(f"[manual] Estimated BPM from onsets: {bpm:.2f}")
+            if self.max_bars:
+                max_duration = (60.0 / bpm) * self.beats_per_bar * self.max_bars
+                if duration > max_duration:
+                    cutoff = (self.start_time or 0) + max_duration
+                    original_len = len(self.recorded)
+                    self.recorded = [m for m in self.recorded if m.timestamp <= cutoff]
+                    duration = max_duration
+                    logger.info(
+                        f"[manual] Trimmed recording to {self.max_bars} bars ({max_duration:.2f}s); kept {len(self.recorded)}/{original_len} events."
+                    )
+        else:
+            logger.info("[manual] Could not infer BPM; using default 120 BPM conversion.")
+
+        prompt_midi_path = buffer_to_tempfile_midi(
+            messages=self.recorded,
+            window_seconds=duration,
+            current_bpm=bpm,
+            ticks_per_beat=self.ticks_per_beat,
+        )
+
+        prompt_ticks, prompt_seconds = self._midi_stats(prompt_midi_path)
+        logger.info(
+            f"[manual] Prompt stats: events={len(self.recorded)}, duration={duration:.2f}s, midi_len={prompt_seconds:.2f}s, ticks={prompt_ticks}"
+        )
+
+        gen_start = time.time()
+        temp, top_p, min_p = self.sampling_state.get_values() if self.sampling_state else (0.9, 0.95, None)
+        logger.info(f"[GEN] temp={temp:.2f} top_p={top_p:.2f} min_p={min_p if min_p is not None else 0.0:.2f}")
+        self._log_ui(
+            f"Generating with temp={temp:.2f} top_p={top_p:.2f} min_p={min_p if min_p is not None else 0.0:.2f}"
+        )
+        if self.osc_params_cb:
+            self.osc_params_cb()
+        generated_path = self.aria_engine.generate(
+            prompt_midi_path=prompt_midi_path,
+            prompt_duration_s=max(1, int(duration)),
+            horizon_s=self.gen_seconds,
+            temperature=temp,
+            top_p=top_p,
+            min_p=min_p,
+            max_new_tokens=self.max_new_tokens,
+        )
+        gen_time = time.time() - gen_start
+        logger.info(f"[manual] Generation finished in {gen_time:.2f}s")
+        if self.session_state:
+            self.session_state.set_status("PLAYING")
+        if self.osc_status_cb:
+            self.osc_status_cb("PLAYING")
+
+        if not generated_path:
+            logger.warning("[manual] Generation returned None; aborting playback.")
+            self._log_ui("Generation returned None")
+            if self.session_state:
+                self.session_state.set_status("IDLE")
+            if self.osc_status_cb:
+                self.osc_status_cb("IDLE")
+            return
+
+        if self.play_gate:
+            self.pending_output_path = generated_path
+            if self.session_state:
+                self.session_state.set_last_output(generated_path)
+                self.session_state.has_pending_output = True
+                self.session_state.set_status("READY")
+            if self.osc_status_cb:
+                self.osc_status_cb("READY")
+            self._log_ui("Output ready. Press 'p' to play.")
+            logger.info("[MANUAL] Output ready. Press 'p' to play.")
+            print("[MANUAL] Output ready. Press 'p' to play.")
+            self._wait_for_play()
+        else:
+            if self.play_toggle:
+                pressed = self.play_toggle.wait_for_press(
+                    f"Press '{self.play_key}' to PLAY generated output, or Ctrl+C to quit.",
+                    self.cancel_event,
+                )
+                if not pressed:
+                    logger.info("[manual] Playback canceled.")
+                    self._log_ui("Playback canceled")
+                    return
+            sent, total = _play_midi_file(generated_path, self.out_port)
+            logger.info(f"[manual] Played generated MIDI ({sent} msgs, {total:.2f}s)")
+            self._log_ui(f"Played generated MIDI ({sent} msgs, {total:.2f}s)")
+            if self.session_state:
+                self.session_state.set_last_output(generated_path)
+                self.session_state.has_pending_output = False
+            if self.osc_log_cb:
+                self.osc_log_cb(f"Played generated MIDI ({sent} msgs, {total:.2f}s)")
+            try:
+                os.unlink(prompt_midi_path)
+            except Exception:
+                pass
+            try:
+                os.unlink(generated_path)
+            except Exception:
+                pass
+            if self.session_state:
+                self.session_state.set_status("IDLE")
+            if self.osc_status_cb:
+                self.osc_status_cb("IDLE")
+
     def _log_ui(self, msg: str):
         if self.log_queue:
             ts = time.strftime("%H:%M:%S")
             self.log_queue.put(f"[{ts}] {msg}")
+        if self.osc_log_cb:
+            self.osc_log_cb(msg)
 
     def run(self) -> int:
         try:
@@ -249,7 +517,7 @@ class ManualModeSession:
             while not self.cancel_event.is_set():
                 stop_key_event = threading.Event()
 
-                # Wait for either keyboard start or UI toggle_record
+                # Wait for either keyboard start or UI/OSC record start
                 start_evt = threading.Event()
 
                 def _wait_keyboard_start():
@@ -262,24 +530,15 @@ class ManualModeSession:
                 threading.Thread(target=_wait_keyboard_start, daemon=True).start()
 
                 while not self.cancel_event.is_set() and not start_evt.is_set():
-                    self._drain_commands(stop_key_event)
-                    if self.recording_flag.is_set():
-                        start_evt.set()
-                        break
+                    self._drain_commands(stop_key_event, start_event=start_evt)
                     time.sleep(0.05)
 
-                armed = start_evt.is_set() or self.recording_flag.is_set()
-                if not armed:
-                    logger.info("Manual mode canceled before start.")
+                if self.cancel_event.is_set():
                     break
+                if not start_evt.is_set() and not self.recording_flag.is_set():
+                    continue
 
-                self.recorded.clear()
-                self.recording_flag.set()
-                self.start_time = time.monotonic()
-                logger.info(f"[manual] Recording started at {self.start_time:.3f}")
-                self._log_ui("Recording started")
-                if self.session_state:
-                    self.session_state.set_status("RECORDING")
+                self._begin_recording()
 
                 stop_key_event = threading.Event()
                 threading.Thread(
@@ -302,102 +561,7 @@ class ManualModeSession:
                         break
                     time.sleep(0.02)
 
-                self.recording_flag.clear()
-                self.stop_time = time.monotonic()
-                duration = (self.stop_time - self.start_time) if self.start_time else 0.0
-                logger.info(f"[manual] Recording stopped at {self.stop_time:.3f} (duration={duration:.2f}s)")
-                self._log_ui("Recording stopped")
-                if self.session_state:
-                    self.session_state.set_status("GENERATING")
-
-                if not self.recorded:
-                    logger.warning("[manual] No MIDI captured. Nothing to generate.")
-                    self._log_ui("No MIDI captured")
-                    if self.session_state:
-                        self.session_state.set_status("IDLE")
-                    continue
-
-                bpm = infer_bpm_from_onsets(self.recorded)
-                if bpm:
-                    logger.info(f"[manual] Estimated BPM from onsets: {bpm:.2f}")
-                    if self.max_bars:
-                        max_duration = (60.0 / bpm) * self.beats_per_bar * self.max_bars
-                        if duration > max_duration:
-                            cutoff = (self.start_time or 0) + max_duration
-                            original_len = len(self.recorded)
-                            self.recorded = [m for m in self.recorded if m.timestamp <= cutoff]
-                            duration = max_duration
-                            logger.info(
-                                f"[manual] Trimmed recording to {self.max_bars} bars ({max_duration:.2f}s); kept {len(self.recorded)}/{original_len} events."
-                            )
-                else:
-                    logger.info("[manual] Could not infer BPM; using default 120 BPM conversion.")
-
-                prompt_midi_path = buffer_to_tempfile_midi(
-                    messages=self.recorded,
-                    window_seconds=duration,
-                    current_bpm=bpm,
-                    ticks_per_beat=self.ticks_per_beat,
-                )
-
-                prompt_ticks, prompt_seconds = self._midi_stats(prompt_midi_path)
-                logger.info(
-                    f"[manual] Prompt stats: events={len(self.recorded)}, duration={duration:.2f}s, midi_len={prompt_seconds:.2f}s, ticks={prompt_ticks}"
-                )
-
-                gen_start = time.time()
-                temp, top_p, min_p = self.sampling_state.get_values() if self.sampling_state else (0.9, 0.95, None)
-                self._log_ui(
-                    f"Generating with temp={temp:.2f} top_p={top_p:.2f} min_p={min_p if min_p is not None else 0.0:.2f}"
-                )
-                generated_path = self.aria_engine.generate(
-                    prompt_midi_path=prompt_midi_path,
-                    prompt_duration_s=max(1, int(duration)),
-                    horizon_s=self.gen_seconds,
-                    temperature=temp,
-                    top_p=top_p,
-                    min_p=min_p,
-                    max_new_tokens=self.max_new_tokens,
-                )
-                gen_time = time.time() - gen_start
-                logger.info(f"[manual] Generation finished in {gen_time:.2f}s")
-                if self.session_state:
-                    self.session_state.set_status("PLAYING")
-
-                if not generated_path:
-                    logger.warning("[manual] Generation returned None; aborting playback.")
-                    self._log_ui("Generation returned None")
-                    if self.session_state:
-                        self.session_state.set_status("IDLE")
-                    continue
-
-                if self.play_toggle:
-                    pressed = self.play_toggle.wait_for_press(
-                        f"Press '{self.play_key}' to PLAY generated output, or Ctrl+C to quit.",
-                        self.cancel_event,
-                    )
-                    if not pressed:
-                        logger.info("[manual] Playback canceled.")
-                        self._log_ui("Playback canceled")
-                        continue
-
-                sent, total = _play_midi_file(generated_path, self.out_port)
-                logger.info(f"[manual] Played generated MIDI ({sent} msgs, {total:.2f}s)")
-                self._log_ui(f"Played generated MIDI ({sent} msgs, {total:.2f}s)")
-                if self.session_state:
-                    self.session_state.set_last_output(generated_path)
-                else:
-                    try:
-                        os.unlink(generated_path)
-                    except Exception:
-                        pass
-                try:
-                    os.unlink(prompt_midi_path)
-                except Exception:
-                    pass
-
-                if self.session_state:
-                    self.session_state.set_status("IDLE")
+                self._finish_recording_and_generate()
 
             return 0
 

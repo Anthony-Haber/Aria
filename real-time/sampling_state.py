@@ -50,6 +50,22 @@ class SamplingState:
         with self._lock:
             return self.temperature, self.top_p, self.min_p
 
+    # direct setters (used by OSC)
+    def set_temperature(self, v: float):
+        with self._lock:
+            self.temperature = self._clamp(v, 0.1, 2.0)
+            return self.temperature
+
+    def set_top_p(self, v: float):
+        with self._lock:
+            self.top_p = self._clamp(v, 0.1, 1.0)
+            return self.top_p
+
+    def set_min_p(self, v: float):
+        with self._lock:
+            self.min_p = self._clamp(v, 0.0, 0.2)
+            return self.min_p
+
 
 class SessionState:
     """Thread-safe session status and last output path."""
@@ -59,6 +75,9 @@ class SessionState:
         self.status = "IDLE"
         self.mode = mode
         self.last_output_path = None
+        self.has_pending_output = False
+        self.is_recording = False
+        self.last_record_level = None
 
     def set_status(self, status: str):
         with self._lock:
@@ -67,7 +86,23 @@ class SessionState:
     def set_last_output(self, path: str | None):
         with self._lock:
             self.last_output_path = path
+            self.has_pending_output = path is not None
 
     def get_snapshot(self):
         with self._lock:
-            return {"mode": self.mode, "status": self.status, "last_output_path": self.last_output_path}
+            return {
+                "mode": self.mode,
+                "status": self.status,
+                "last_output_path": self.last_output_path,
+                "has_pending_output": self.has_pending_output,
+                "is_recording": self.is_recording,
+                "last_record_level": self.last_record_level,
+            }
+
+    def set_record_level(self, level: int):
+        with self._lock:
+            self.last_record_level = level
+
+    def set_recording(self, flag: bool):
+        with self._lock:
+            self.is_recording = flag

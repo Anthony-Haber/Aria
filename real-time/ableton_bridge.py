@@ -214,6 +214,28 @@ def main():
         help="Manual mode: optional keyboard key to arm playback of generated MIDI (defaults to auto-play).",
     )
     parser.add_argument(
+        "--m4l",
+        action="store_true",
+        help="Enable OSC control plane for Max for Live (optional, default off)",
+    )
+    parser.add_argument(
+        "--osc-host",
+        default="127.0.0.1",
+        help="OSC host (default: 127.0.0.1)",
+    )
+    parser.add_argument(
+        "--osc-in-port",
+        type=int,
+        default=9000,
+        help="OSC UDP port to listen for incoming control (default: 9000)",
+    )
+    parser.add_argument(
+        "--osc-out-port",
+        type=int,
+        default=9001,
+        help="OSC UDP port to send status/logs (default: 9001)",
+    )
+    parser.add_argument(
         "--ui",
         action="store_true",
         help="Launch optional Tkinter UI panel for live control/status",
@@ -252,6 +274,7 @@ def main():
             from .sampling_state import SamplingState, SessionState
             from .sampling_hotkeys import start_sampling_hotkeys
             from .ui_panel import run_ui
+            from .osc_controller import OscController
             import_mode = "package"
         except ImportError:
             from midi_buffer import RollingMidiBuffer
@@ -262,6 +285,7 @@ def main():
             from sampling_state import SamplingState, SessionState
             from sampling_hotkeys import start_sampling_hotkeys
             from ui_panel import run_ui
+            from osc_controller import OscController
             import_mode = "script"
 
         logger.debug(f"Import mode: {import_mode}")
@@ -296,6 +320,20 @@ def main():
         session_state = SessionState(mode=args.mode)
         cmd_queue = queue.Queue()
         log_queue = queue.Queue()
+        osc = None
+        if args.m4l:
+            osc = OscController(
+                host=args.osc_host,
+                in_port=args.osc_in_port,
+                out_port=args.osc_out_port,
+                sampling_state=sampling_state,
+                session_state=session_state,
+                command_queue=cmd_queue,
+            )
+            osc.start()
+            if osc:
+                osc.send_status(session_state.status if hasattr(session_state, "status") else "IDLE")
+                osc.send_params()
 
         if args.mode == "manual":
             session = ManualModeSession(
@@ -311,9 +349,13 @@ def main():
                 max_new_tokens=args.max_new_tokens,
                 play_key=args.play_key,
                 sampling_state=sampling_state,
-                command_queue=cmd_queue if args.ui else None,
-                log_queue=log_queue if args.ui else None,
-                session_state=session_state if args.ui else None,
+                command_queue=cmd_queue if (args.ui or args.m4l) else None,
+                log_queue=log_queue if (args.ui or args.m4l) else None,
+                session_state=session_state if (args.ui or args.m4l) else None,
+                osc_status_cb=osc.send_status if osc else None,
+                osc_log_cb=osc.send_log if osc else None,
+                osc_params_cb=osc.send_params if osc else None,
+                play_gate=bool(args.m4l),
             )
             if args.ui:
                 session_thread = threading.Thread(target=session.run, daemon=True)

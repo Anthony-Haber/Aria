@@ -68,6 +68,7 @@ class GenerationWorker(threading.Thread):
                     start_time = time.time()
                     try:
                         temp, top_p, min_p = job.sampling_state.get_values()
+                        logger.info(f"[GEN] temp={temp:.2f} top_p={top_p:.2f} min_p={min_p if min_p is not None else 0.0:.2f}")
                         # Horizon in seconds: gen_bars * 1.0s per bar (roughly)
                         horizon_s = job.gen_bars * 1.0
                         midi_path = job.aria_engine.generate(
