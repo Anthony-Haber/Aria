@@ -205,6 +205,7 @@ This mode combines **manual keyboard control with OSC (Open Sound Control)** for
 3. The device sends OSC messages to control:
    - `record` start/stop
    - `temperature`, `top_p`, `min_p` parameters
+   - `tokens` (0–2048) max generation tokens
    - `play` output triggering
 4. Receive real-time status and log messages back to Max.
 
@@ -246,6 +247,7 @@ python ableton_bridge.py \
 | `/aria/temp` | `float` 0.1–2.0 | Set sampling temperature |
 | `/aria/top_p` | `float` 0.1–1.0 | Set top-p threshold |
 | `/aria/min_p` | `float` 0.0–0.2 | Set min-p threshold |
+| `/aria/tokens` | `int` 0–2048 | Set `max_new_tokens` generation budget |
 | `/aria/play` | — | Trigger playback of last generation |
 | `/aria/cancel` | — | Cancel current recording |
 | `/aria/ping` | — | Request status snapshot |

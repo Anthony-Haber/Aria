@@ -40,6 +40,7 @@ class OscController:
         disp.map("/aria/temp", self._handle_temp)
         disp.map("/aria/top_p", self._handle_top_p)
         disp.map("/aria/min_p", self._handle_min_p)
+        disp.map("/aria/tokens", self._handle_tokens)
         disp.map("/aria/cancel", self._handle_cancel)
         disp.map("/aria/ping", self._handle_ping)
         disp.map("/aria/play", self._handle_play)
@@ -194,6 +195,20 @@ class OscController:
         self.sampling_state.set_min_p(v)
         self.send_params()
         self.send_log(f"Min_p -> {self.sampling_state.get_values()[2]:.2f}")
+
+    def _handle_tokens(self, addr, *args):
+        logger.info(f"[OSC] {addr} {args}")
+        if not args:
+            return
+        try:
+            v = float(args[0])
+        except Exception:
+            self.send_log("Invalid /aria/tokens payload (ignored)")
+            return
+        # Clamp to integer range 0-2048
+        clamped = int(max(0, min(2048, round(v))))
+        self.session_state.set_max_tokens(clamped)
+        self.send_log(f"Max tokens -> {clamped}")
 
     def _handle_ping(self, addr, *args):
         self.send_status(self.session_state.get_snapshot().get("status", "UNKNOWN"))

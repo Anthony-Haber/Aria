@@ -78,6 +78,7 @@ class SessionState:
         self.has_pending_output = False
         self.is_recording = False
         self.last_record_level = None
+        self.max_tokens = None  # Optional override for generation budget
 
     def set_status(self, status: str):
         with self._lock:
@@ -97,6 +98,7 @@ class SessionState:
                 "has_pending_output": self.has_pending_output,
                 "is_recording": self.is_recording,
                 "last_record_level": self.last_record_level,
+                "max_tokens": self.max_tokens,
             }
 
     def set_record_level(self, level: int):
@@ -106,3 +108,11 @@ class SessionState:
     def set_recording(self, flag: bool):
         with self._lock:
             self.is_recording = flag
+
+    def set_max_tokens(self, val: int | None):
+        with self._lock:
+            self.max_tokens = val
+
+    def get_max_tokens(self) -> int | None:
+        with self._lock:
+            return self.max_tokens

@@ -160,6 +160,13 @@ class ManualModeSession:
         self.out_port = None
         self.midi_thread = None
 
+    def _resolve_max_tokens(self) -> Optional[int]:
+        if self.session_state:
+            val = self.session_state.get_max_tokens()
+            if val is not None:
+                return int(val)
+        return self.max_new_tokens
+
     def _open_ports(self) -> None:
         import mido
         self.in_port = mido.open_input(self.in_port_name)
@@ -430,6 +437,10 @@ class ManualModeSession:
         )
         if self.osc_params_cb:
             self.osc_params_cb()
+        tokens = self._resolve_max_tokens()
+        if tokens is not None:
+            logger.info(f"[GEN] max_new_tokens={tokens}")
+            self._log_ui(f"Max tokens -> {tokens}")
         generated_path = self.aria_engine.generate(
             prompt_midi_path=prompt_midi_path,
             prompt_duration_s=max(1, int(duration)),
@@ -437,7 +448,7 @@ class ManualModeSession:
             temperature=temp,
             top_p=top_p,
             min_p=min_p,
-            max_new_tokens=self.max_new_tokens,
+            max_new_tokens=tokens,
         )
         gen_time = time.time() - gen_start
         logger.info(f"[manual] Generation finished in {gen_time:.2f}s")
