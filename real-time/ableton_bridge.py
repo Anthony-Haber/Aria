@@ -342,6 +342,11 @@ def main():
 
     args = parser.parse_args()
 
+    # Handle port listing early to avoid requiring checkpoint or other setup
+    if args.list_ports:
+        get_midi_ports()
+        return 0
+
     # Validation: feedback mode requires data directory
     if args.feedback and args.data_dir is None:
         print("Error: --data-dir must be specified when using --feedback")
@@ -361,10 +366,6 @@ def main():
         feedback_manager = FeedbackManager(datastore)
     else:
         feedback_manager = None
-
-    if args.list_ports:
-        get_midi_ports()
-        return 0
 
     # Import and start bridge
     try:
