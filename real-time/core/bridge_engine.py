@@ -5,6 +5,7 @@ import os
 import queue
 import threading
 import time
+from pathlib import Path
 from typing import Optional
 
 from .prompt_midi import buffer_to_tempfile_midi
@@ -32,8 +33,8 @@ class GenerationJob:
 
 class GenerationWorker(threading.Thread):
     """Background thread that processes generation jobs asynchronously."""
-    
-    def __init__(self, job_queue: queue.Queue):
+
+    def __init__(self, job_queue: queue.Queue, feedback_manager=None):
         """
         Args:
             job_queue: Queue of GenerationJob objects
@@ -41,6 +42,7 @@ class GenerationWorker(threading.Thread):
         super().__init__(daemon=True)
         self.job_queue = job_queue
         self.running = False
+        self.feedback_manager = feedback_manager
 
     def run(self):
         """Process generation jobs from queue."""
@@ -81,6 +83,27 @@ class GenerationWorker(threading.Thread):
                         if midi_path:
                             job.result_midi_path = midi_path
                             logger.info(f"[gen_worker] Bar {job.bar_index} ({job.gen_bars}-bar generation) done in {gen_time:.2f}s")
+                            if self.feedback_manager:
+                                try:
+                                    prompt_bytes = Path(prompt_midi_path).read_bytes()
+                                    output_bytes = Path(midi_path).read_bytes()
+                                    params = {
+                                        "temperature": temp,
+                                        "top_p": top_p,
+                                        "min_p": min_p,
+                                        "max_tokens": None,
+                                        "seed": None,
+                                    }
+                                    episode_id = self.feedback_manager.record_generation(
+                                        prompt_bytes=prompt_bytes,
+                                        output_bytes=output_bytes,
+                                        params=params,
+                                        mode="clock",
+                                    )
+                                    if episode_id:
+                                        logger.info(f"[feedback] Draft episode created: {episode_id}")
+                                except Exception as e:
+                                    logger.warning(f"[feedback] Failed to create episode: {e}")
                         else:
                             logger.warning(f"[gen_worker] Bar {job.bar_index} generation returned None")
                     except Exception as e:
@@ -136,6 +159,7 @@ class AbletonBridge:
         sampling_state=None,
         quantize: bool = False,
         ticks_per_beat: int = 480,
+        feedback_manager=None,
     ):
         """
         Args:
@@ -168,6 +192,7 @@ class AbletonBridge:
         self.sampling_state = sampling_state
         self.quantize = quantize
         self.ticks_per_beat = ticks_per_beat
+        self.feedback_manager = feedback_manager
 
         # MIDI I/O
         self.in_port = None
@@ -222,7 +247,7 @@ class AbletonBridge:
         self.pending_ai_job = None  # Current job being processed
         self.pending_ai_response = None  # Path to N-measure MIDI when ready
         self.pending_ai_response_lock = threading.RLock()
-        self.gen_worker = GenerationWorker(self.gen_job_queue)
+        self.gen_worker = GenerationWorker(self.gen_job_queue, feedback_manager=self.feedback_manager)
 
     def run(self):
         """Start the bridge: input, generation, output threads."""

@@ -1,8 +1,9 @@
 """Optional OSC control plane for Max for Live integration."""
 
+import logging
 import threading
 import time
-import logging
+from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,8 @@ class OscController:
         sampling_state,
         session_state,
         command_queue,
+        commit_cb=None,
+        grade_cb=None,
     ):
         self.host = host
         self.in_port = in_port
@@ -23,10 +26,28 @@ class OscController:
         self.sampling_state = sampling_state
         self.session_state = session_state
         self.command_queue = command_queue
+        self.commit_cb = commit_cb
+        self.grade_cb = grade_cb
         self.server = None
         self.client = None
         self.stop_event = threading.Event()
         self.thread = None
+        self.dispatcher = None
+        # Track initial sync from M4L
+        self._startup_lock = threading.Lock()
+        self._startup_events: Dict[str, threading.Event] = {
+            "temp": threading.Event(),
+            "top_p": threading.Event(),
+            "min_p": threading.Event(),
+            "tokens": threading.Event(),
+        }
+        self._startup_state: Dict[str, Optional[float]] = {
+            "temp": None,
+            "top_p": None,
+            "min_p": None,
+            "tokens": None,
+        }
+        self._debug_enabled = False
 
     def start(self):
         try:
@@ -44,10 +65,15 @@ class OscController:
         disp.map("/aria/cancel", self._handle_cancel)
         disp.map("/aria/ping", self._handle_ping)
         disp.map("/aria/play", self._handle_play)
+        disp.map("/aria/grade", self._handle_grade)
+        disp.map("/aria/commit", self._handle_commit)
+        self.dispatcher = disp
 
         try:
+            # Outbound client remains for status/logs; no startup request is sent.
             self.client = udp_client.SimpleUDPClient(self.host, self.out_port)
             self.server = osc_server.ThreadingOSCUDPServer((self.host, self.in_port), disp)
+            self.server.timeout = 0.2
         except Exception as e:
             logger.error(f"Failed to start OSC server: {e}")
             return
@@ -60,6 +86,93 @@ class OscController:
 
         self.thread = threading.Thread(target=_serve, daemon=True)
         self.thread.start()
+
+    def _record_startup_value(self, key: str, value: float | int):
+        # Save first-seen values for startup sync and mark event
+        with self._startup_lock:
+            self._startup_state[key] = value
+        if key in self._startup_events:
+            self._startup_events[key].set()
+
+    def _startup_snapshot(self) -> Dict[str, Optional[float]]:
+        with self._startup_lock:
+            return dict(self._startup_state)
+
+    def _enable_debug_logging(self):
+        if self.dispatcher and not self._debug_enabled:
+            self.dispatcher.set_default_handler(self._debug_handler, needs_reply_address=False)
+            self._debug_enabled = True
+
+    def _disable_debug_logging(self):
+        if self.dispatcher and self._debug_enabled:
+            self.dispatcher.set_default_handler(None)
+            self._debug_enabled = False
+
+    def _debug_handler(self, address, *args):
+        logger.info(f"[OSC][debug] {address} {args}")
+
+    def sync_state_on_startup(self, timeout: float = 3.0) -> Dict[str, Optional[float]]:
+        """
+        Wait briefly for Max for Live to push its current parameters, then
+        apply them to the shared sampling/session config.
+        """
+        if not self.client or not self.server:
+            logger.warning("OSC controller not started; skipping startup sync.")
+            temp, top_p, min_p = self.sampling_state.get_values()
+            return {
+                "temp": temp,
+                "top_p": top_p,
+                "min_p": min_p,
+                "tokens": self.session_state.get_max_tokens(),
+            }
+
+        # Default state falls back to current values; overwritten on success
+        base_temp, base_top_p, base_min_p = self.sampling_state.get_values()
+        state: Dict[str, Optional[float | int]] = {
+            "temp": base_temp,
+            "top_p": base_top_p,
+            "min_p": base_min_p,
+            "tokens": self.session_state.get_max_tokens(),
+        }
+
+        try:
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                if all(ev.is_set() for ev in self._startup_events.values()):
+                    break
+                time.sleep(0.01)
+
+            snapshot = self._startup_snapshot()
+            missing = [k for k, v in snapshot.items() if v is None]
+
+            temp, top_p, min_p = self.sampling_state.get_values()
+            state = {
+                "temp": float(snapshot["temp"]) if snapshot["temp"] is not None else temp,
+                "top_p": float(snapshot["top_p"]) if snapshot["top_p"] is not None else top_p,
+                "min_p": float(snapshot["min_p"]) if snapshot["min_p"] is not None else min_p,
+                "tokens": (
+                    int(snapshot["tokens"])
+                    if snapshot["tokens"] is not None
+                    else self.session_state.get_max_tokens()
+                ),
+            }
+
+            if missing:
+                logger.warning("No OSC state received at startup. Waiting for Ableton push...")
+
+            # Apply to live config
+            self.sampling_state.set_temperature(state["temp"])
+            self.sampling_state.set_top_p(state["top_p"])
+            self.sampling_state.set_min_p(state["min_p"])
+            if state["tokens"] is not None:
+                self.session_state.set_max_tokens(int(state["tokens"]))
+
+            logger.info(f"Startup sync complete. Current params: {state}")
+        finally:
+            # Turn off noisy default handler after sync attempt (if ever enabled)
+            self._disable_debug_logging()
+
+        return state
 
     def stop(self):
         self.stop_event.set()
@@ -160,8 +273,35 @@ class OscController:
         self.command_queue.put(("play", None))
         self.send_log("Play requested (OSC)")
 
+    def _handle_grade(self, addr, *args):
+        print("OSC RECEIVED:", addr, args)
+        if not args:
+            return
+        try:
+            grade = int(float(args[0]))
+        except Exception:
+            logger.warning("Invalid /aria/grade payload (ignored)")
+            return
+        logger.info(f"[OSC] grade -> {grade}")
+        if self.grade_cb:
+            self.grade_cb(grade)
+
+    def _handle_commit(self, addr, *args):
+        flag = 0
+        if args:
+            try:
+                flag = int(float(args[0]))
+            except Exception:
+                flag = 0
+        if flag >= 1:
+            logger.info("[OSC] commit received")
+            if self.commit_cb:
+                self.commit_cb()
+        else:
+            logger.info("[OSC] commit ignored (flag not set)")
+
     def _handle_temp(self, addr, *args):
-        logger.info(f"[OSC] {addr} {args}")
+        logger.info(f"Received /aria/temp: {args[0] if args else 'None'}")
         if not args:
             return
         try:
@@ -169,11 +309,12 @@ class OscController:
         except Exception:
             return
         self.sampling_state.set_temperature(v)
+        self._record_startup_value("temp", v)
         self.send_params()
         self.send_log(f"Temp -> {self.sampling_state.get_values()[0]:.2f}")
 
     def _handle_top_p(self, addr, *args):
-        logger.info(f"[OSC] {addr} {args}")
+        logger.info(f"Received /aria/top_p: {args[0] if args else 'None'}")
         if not args:
             return
         try:
@@ -181,11 +322,12 @@ class OscController:
         except Exception:
             return
         self.sampling_state.set_top_p(v)
+        self._record_startup_value("top_p", v)
         self.send_params()
         self.send_log(f"Top_p -> {self.sampling_state.get_values()[1]:.2f}")
 
     def _handle_min_p(self, addr, *args):
-        logger.info(f"[OSC] {addr} {args}")
+        logger.info(f"Received /aria/min_p: {args[0] if args else 'None'}")
         if not args:
             return
         try:
@@ -193,11 +335,12 @@ class OscController:
         except Exception:
             return
         self.sampling_state.set_min_p(v)
+        self._record_startup_value("min_p", v)
         self.send_params()
         self.send_log(f"Min_p -> {self.sampling_state.get_values()[2]:.2f}")
 
     def _handle_tokens(self, addr, *args):
-        logger.info(f"[OSC] {addr} {args}")
+        logger.info(f"Received /aria/tokens: {args[0] if args else 'None'}")
         if not args:
             return
         try:
@@ -208,6 +351,7 @@ class OscController:
         # Clamp to integer range 0-2048
         clamped = int(max(0, min(2048, round(v))))
         self.session_state.set_max_tokens(clamped)
+        self._record_startup_value("tokens", clamped)
         self.send_log(f"Max tokens -> {clamped}")
 
     def _handle_ping(self, addr, *args):

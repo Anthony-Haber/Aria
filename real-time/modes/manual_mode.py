@@ -14,6 +14,7 @@ import threading
 import time
 import queue
 from typing import Iterable, List, Optional, Tuple
+from pathlib import Path
 
 from core.midi_buffer import TimestampedMidiMsg
 from core.prompt_midi import buffer_to_tempfile_midi
@@ -121,6 +122,7 @@ class ManualModeSession:
         osc_log_cb=None,
         osc_params_cb=None,
         play_gate: bool = False,
+        feedback_manager=None,
     ):
         self.in_port_name = in_port_name
         self.out_port_name = out_port_name
@@ -144,6 +146,7 @@ class ManualModeSession:
         self.osc_params_cb = osc_params_cb
         # Gate playback to explicit PLAY command/key to keep manual + OSC paths consistent.
         self.play_gate = True
+        self.feedback_manager = feedback_manager
         self.pending_output_path = None
         self._msg_count = 0
         self._note_on_count = 0
@@ -452,6 +455,7 @@ class ManualModeSession:
         )
         gen_time = time.time() - gen_start
         logger.info(f"[manual] Generation finished in {gen_time:.2f}s")
+        self._capture_feedback(prompt_midi_path, generated_path, temp, top_p, min_p, tokens)
         if self.session_state:
             self.session_state.set_status("PLAYING")
         if self.osc_status_cb:
@@ -515,6 +519,31 @@ class ManualModeSession:
             self.log_queue.put(f"[{ts}] {msg}")
         if self.osc_log_cb:
             self.osc_log_cb(msg)
+
+    def _capture_feedback(self, prompt_path: str, output_path: str | None, temp, top_p, min_p, tokens):
+        if not self.feedback_manager or not output_path:
+            return
+        try:
+            prompt_bytes = Path(prompt_path).read_bytes()
+            output_bytes = Path(output_path).read_bytes()
+        except Exception as e:
+            logger.warning(f"[feedback] Failed to read MIDI files: {e}")
+            return
+        params = {
+            "temperature": temp,
+            "top_p": top_p,
+            "min_p": min_p,
+            "max_tokens": tokens,
+            "seed": None,
+        }
+        episode_id = self.feedback_manager.record_generation(
+            prompt_bytes=prompt_bytes,
+            output_bytes=output_bytes,
+            params=params,
+            mode="manual",
+        )
+        if episode_id:
+            logger.info(f"[feedback] Draft episode created: {episode_id}")
 
     def run(self) -> int:
         try:

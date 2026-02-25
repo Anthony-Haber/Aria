@@ -18,6 +18,12 @@ import sys
 import threading
 import queue
 from pathlib import Path
+from typing import Optional, Dict
+
+try:
+    from core.datastore import DataStore
+except ImportError:  # Package import path
+    from .core.datastore import DataStore
 
 # Logging
 logging.basicConfig(
@@ -28,28 +34,61 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def find_checkpoint(checkpoint_hint: str = "aria-medium-gen") -> str:
+def find_checkpoint(checkpoint_hint: Optional[str] = None) -> str:
     """
-    Locate the checkpoint file. Try default locations first.
+    Locate the checkpoint file. 
+    
+    Args:
+        checkpoint_hint: Explicit path provided by user, or None to search defaults.
+    
+    Returns:
+        Path to checkpoint file.
+    
+    Raises:
+        FileNotFoundError: If checkpoint cannot be found.
     """
-    if os.path.isfile(checkpoint_hint):
-        return checkpoint_hint
+    # If user provided a path, use it directly
+    if checkpoint_hint:
+        if os.path.isfile(checkpoint_hint):
+            logger.info(f"Using checkpoint: {checkpoint_hint}")
+            return checkpoint_hint
+        
+        # Try relative paths from script location
+        rel_paths = [
+            Path(checkpoint_hint),
+            Path(__file__).parent / checkpoint_hint,
+            Path(__file__).parent.parent / checkpoint_hint,
+        ]
+        for p in rel_paths:
+            if p.exists():
+                logger.info(f"Found checkpoint: {p}")
+                return str(p.resolve())
 
-    # Try in models/ folder
+    # If no hint or hint not found, search default locations
     default_paths = [
-        Path("models") / f"{checkpoint_hint}.safetensors",
-        Path(__file__).parent.parent / "models" / f"{checkpoint_hint}.safetensors",
+        Path("models/model-gen.safetensors"),
+        Path(__file__).parent / "models" / "model-gen.safetensors",
+        Path(__file__).parent.parent / "models" / "model-gen.safetensors",
     ]
 
     for p in default_paths:
         if p.exists():
-            logger.info(f"Found checkpoint: {p}")
-            return str(p)
+            logger.info(f"Found checkpoint at default location: {p}")
+            return str(p.resolve())
 
-    raise FileNotFoundError(
-        f"Could not find checkpoint '{checkpoint_hint}'. "
-        f"Searched: {default_paths}. Provide --checkpoint with full path."
-    )
+    # Not found
+    if checkpoint_hint:
+        raise FileNotFoundError(
+            f"Could not find checkpoint '{checkpoint_hint}'. "
+            f"Searched: {[str(p) for p in rel_paths]}. "
+            f"Provide --checkpoint with correct path."
+        )
+    else:
+        raise FileNotFoundError(
+            f"No checkpoint found. Please provide --checkpoint with path to model.safetensors. "
+            f"Example: python ableton_bridge.py --checkpoint ../models/model-gen.safetensors "
+            f"--in ARIA_IN --out ARIA_OUT"
+        )
 
 
 def get_midi_ports():
@@ -66,6 +105,54 @@ def get_midi_ports():
             logger.info(f"  - {port}")
     except Exception as e:
         logger.warning(f"Could not list MIDI ports: {e}")
+
+
+def sync_state_on_startup(osc_controller, timeout: float = 2.0):
+    """
+    Kick off the OSC controller's initial state sync and return the received state.
+    """
+    if not osc_controller:
+        return None
+    try:
+        return osc_controller.sync_state_on_startup(timeout=timeout)
+    except Exception as e:
+        logger.warning(f"OSC startup sync failed: {e}")
+        return None
+
+
+class FeedbackManager:
+    def __init__(self, datastore: DataStore):
+        self.datastore = datastore
+        self.lock = threading.Lock()
+        self.current_episode_id: Optional[str] = None
+        self.waiting_for_commit: bool = False
+        self.latest_grade: Optional[int] = None
+
+    def record_generation(self, prompt_bytes: bytes, output_bytes: bytes, params: Dict, mode: str) -> Optional[str]:
+        with self.lock:
+            if self.waiting_for_commit:
+                logger.warning("Feedback episode already pending commit; skipping new episode.")
+                return None
+            episode_id = self.datastore.create_episode(prompt_bytes, output_bytes, params, mode=mode)
+            self.current_episode_id = episode_id
+            self.waiting_for_commit = True
+            return episode_id
+
+    def set_grade(self, grade: int):
+        with self.lock:
+            self.latest_grade = int(grade)
+
+    def commit(self):
+        with self.lock:
+            if not self.waiting_for_commit or not self.current_episode_id:
+                logger.info("No pending feedback episode to commit.")
+                return
+            grade = self.latest_grade if self.latest_grade is not None else 0
+            self.datastore.finalize_episode(self.current_episode_id, grade)
+            logger.info(f"Feedback episode {self.current_episode_id} finalized with grade={grade}.")
+            self.current_episode_id = None
+            self.waiting_for_commit = False
+            self.latest_grade = None
 
 
 def main():
@@ -88,8 +175,9 @@ def main():
     )
     parser.add_argument(
         "--checkpoint",
-        default=r"C:\Code\Github Serious\Aria\models\model-gen.safetensors",
-        help="Path to Aria checkpoint (default: C:\\Code\\Github Serious\\Aria\\models\\model-gen.safetensors)",
+        default=None,
+        help="Path to Aria checkpoint (required unless using --feedback-only). "
+             "Can be relative (e.g., '../models/model-gen.safetensors') or absolute.",
     )
     parser.add_argument(
         "--listen_seconds",
@@ -240,27 +328,43 @@ def main():
         action="store_true",
         help="Launch optional Tkinter UI panel for live control/status",
     )
+    parser.add_argument(
+        "--feedback",
+        action="store_true",
+        help="Enable real-time feedback dataset capture mode",
+    )
+    parser.add_argument(
+        "--data-dir",
+        type=str,
+        default=None,
+        help="External directory for storing feedback dataset",
+    )
 
     args = parser.parse_args()
+
+    # Validation: feedback mode requires data directory
+    if args.feedback and args.data_dir is None:
+        print("Error: --data-dir must be specified when using --feedback")
+        sys.exit(1)
+
+    # Validation: checkpoint is required unless feedback-only mode
+    if args.checkpoint is None and not args.feedback:
+        print("Error: --checkpoint must be specified. Use --checkpoint /path/to/model.safetensors")
+        print("Example: python ableton_bridge.py --checkpoint ../models/model-gen.safetensors --in ARIA_IN --out ARIA_OUT")
+        sys.exit(1)
+
+    if args.feedback:
+        data_dir = Path(args.data_dir)
+        data_dir.mkdir(parents=True, exist_ok=True)
+        print(f"[Feedback] Using dataset directory: {data_dir}")
+        datastore = DataStore(data_dir)
+        feedback_manager = FeedbackManager(datastore)
+    else:
+        feedback_manager = None
 
     if args.list_ports:
         get_midi_ports()
         return 0
-
-    # Verify CUDA if needed
-    if args.device == "cuda":
-        import torch
-        if not torch.cuda.is_available():
-            logger.error("CUDA requested but not available. Use --device cpu")
-            return 1
-        logger.info(f"CUDA device: {torch.cuda.get_device_name(0)}")
-
-    # Find checkpoint
-    try:
-        checkpoint_path = find_checkpoint(args.checkpoint)
-    except FileNotFoundError as e:
-        logger.error(str(e))
-        return 1
 
     # Import and start bridge
     try:
@@ -290,6 +394,49 @@ def main():
 
         logger.debug(f"Import mode: {import_mode}")
 
+        # Shared state + queues (init before heavy model load so OSC can sync immediately)
+        sampling_state = SamplingState(
+            temperature=args.temperature,
+            top_p=args.top_p,
+            min_p=args.min_p if args.min_p is not None else 0.0,
+        )
+        session_state = SessionState(mode=args.mode)
+        cmd_queue = queue.Queue()
+        log_queue = queue.Queue()
+        hotkey_stop = threading.Event()
+
+        osc = None
+        startup_state = None
+        if args.m4l:
+            osc = OscController(
+                host=args.osc_host,
+                in_port=args.osc_in_port,
+                out_port=args.osc_out_port,
+                sampling_state=sampling_state,
+                session_state=session_state,
+                command_queue=cmd_queue,
+                commit_cb=(feedback_manager.commit if feedback_manager else None),
+                grade_cb=(feedback_manager.set_grade if feedback_manager else None),
+            )
+            # Start OSC server first, then pull current dial state from Max
+            osc.start()
+            startup_state = sync_state_on_startup(osc, timeout=2.0)
+            if startup_state:
+                logger.info(f"OSC params after startup sync: {startup_state}")
+
+        # Verify CUDA if needed (after OSC server is alive)
+        if args.device == "cuda":
+            import torch
+            if not torch.cuda.is_available():
+                logger.error("CUDA requested but not available. Use --device cpu")
+                return 1
+            logger.info(f"CUDA device: {torch.cuda.get_device_name(0)}")
+
+        checkpoint_path = find_checkpoint(args.checkpoint)
+
+        # Keyboard hotkeys (after OSC sync so defaults reflect Max state)
+        start_sampling_hotkeys(sampling_state, hotkey_stop)
+
         logger.info(f"Connecting to ports: IN={args.in_port}, OUT={args.out_port}")
         logger.info(f"Checkpoint: {checkpoint_path}")
         logger.info(
@@ -309,31 +456,9 @@ def main():
             config_name="medium",
         )
 
-        # Shared sampling state + hotkeys
-        sampling_state = SamplingState(
-            temperature=args.temperature,
-            top_p=args.top_p,
-            min_p=args.min_p if args.min_p is not None else 0.0,
-        )
-        hotkey_stop = threading.Event()
-        start_sampling_hotkeys(sampling_state, hotkey_stop)
-        session_state = SessionState(mode=args.mode)
-        cmd_queue = queue.Queue()
-        log_queue = queue.Queue()
-        osc = None
-        if args.m4l:
-            osc = OscController(
-                host=args.osc_host,
-                in_port=args.osc_in_port,
-                out_port=args.osc_out_port,
-                sampling_state=sampling_state,
-                session_state=session_state,
-                command_queue=cmd_queue,
-            )
-            osc.start()
-            if osc:
-                osc.send_status(session_state.status if hasattr(session_state, "status") else "IDLE")
-                osc.send_params()
+        if osc:
+            osc.send_status(session_state.status if hasattr(session_state, "status") else "IDLE")
+            osc.send_params()
 
         if args.mode == "manual":
             session = ManualModeSession(
@@ -356,6 +481,7 @@ def main():
                 osc_log_cb=osc.send_log if osc else None,
                 osc_params_cb=osc.send_params if osc else None,
                 play_gate=bool(args.m4l),
+                feedback_manager=feedback_manager,
             )
             if args.ui:
                 session_thread = threading.Thread(target=session.run, daemon=True)
@@ -406,6 +532,7 @@ def main():
             min_p=args.min_p,
             quantize=args.quantize,
             ticks_per_beat=args.ticks_per_beat,
+            feedback_manager=feedback_manager,
         )
 
         if args.ui:
@@ -421,6 +548,9 @@ def main():
             hotkey_stop.set()
             return 0
 
+    except FileNotFoundError as e:
+        logger.error(str(e))
+        return 1
     except Exception as e:
         logger.exception(f"Fatal error: {e}")
         return 1
