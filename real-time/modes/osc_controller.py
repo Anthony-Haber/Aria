@@ -19,6 +19,7 @@ class OscController:
         command_queue,
         commit_cb=None,
         grade_cb=None,
+        feedback_param_cb=None,
     ):
         self.host = host
         self.in_port = in_port
@@ -28,6 +29,7 @@ class OscController:
         self.command_queue = command_queue
         self.commit_cb = commit_cb
         self.grade_cb = grade_cb
+        self.feedback_param_cb = feedback_param_cb
         self.server = None
         self.client = None
         self.stop_event = threading.Event()
@@ -65,6 +67,10 @@ class OscController:
         disp.map("/aria/cancel", self._handle_cancel)
         disp.map("/aria/ping", self._handle_ping)
         disp.map("/aria/play", self._handle_play)
+        disp.map("/aria/coherence", self._handle_coherence)
+        disp.map("/aria/repetition", self._handle_repetition)
+        disp.map("/aria/taste", self._handle_taste)
+        disp.map("/aria/continuity", self._handle_continuity)
         disp.map("/aria/grade", self._handle_grade)
         disp.map("/aria/commit", self._handle_commit)
         self.dispatcher = disp
@@ -272,6 +278,30 @@ class OscController:
         logger.info("[OSC] play -> SEND OUTPUT")
         self.command_queue.put(("play", None))
         self.send_log("Play requested (OSC)")
+
+    def _handle_feedback_param(self, name: str, args):
+        if not args:
+            return
+        try:
+            val = float(args[0])
+        except Exception:
+            logger.warning(f"Invalid payload for /aria/{name} (ignored)")
+            return
+        logger.info(f"[OSC] {name} -> {val}")
+        if self.feedback_param_cb:
+            self.feedback_param_cb(name, val)
+
+    def _handle_coherence(self, addr, *args):
+        self._handle_feedback_param("coherence", args)
+
+    def _handle_repetition(self, addr, *args):
+        self._handle_feedback_param("repetition", args)
+
+    def _handle_taste(self, addr, *args):
+        self._handle_feedback_param("taste", args)
+
+    def _handle_continuity(self, addr, *args):
+        self._handle_feedback_param("continuity", args)
 
     def _handle_grade(self, addr, *args):
         print("OSC RECEIVED:", addr, args)

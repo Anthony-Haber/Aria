@@ -127,13 +127,26 @@ class FeedbackManager:
         self.current_episode_id: Optional[str] = None
         self.waiting_for_commit: bool = False
         self.latest_grade: Optional[int] = None
+        self.coherence: Optional[float] = None
+        self.repetition: Optional[float] = None
+        self.taste: Optional[float] = None
+        self.continuity: Optional[float] = None
 
     def record_generation(self, prompt_bytes: bytes, output_bytes: bytes, params: Dict, mode: str) -> Optional[str]:
         with self.lock:
             if self.waiting_for_commit:
                 logger.warning("Feedback episode already pending commit; skipping new episode.")
                 return None
-            episode_id = self.datastore.create_episode(prompt_bytes, output_bytes, params, mode=mode)
+            enriched = dict(params)
+            enriched.update(
+                {
+                    "coherence": self.coherence,
+                    "repetition": self.repetition,
+                    "taste": self.taste,
+                    "continuity": self.continuity,
+                }
+            )
+            episode_id = self.datastore.create_episode(prompt_bytes, output_bytes, enriched, mode=mode)
             self.current_episode_id = episode_id
             self.waiting_for_commit = True
             return episode_id
@@ -142,13 +155,34 @@ class FeedbackManager:
         with self.lock:
             self.latest_grade = int(grade)
 
+    def set_feedback_param(self, name: str, value: float):
+        with self.lock:
+            try:
+                v = float(value)
+            except Exception:
+                return
+            if name == "coherence":
+                self.coherence = v
+            elif name == "repetition":
+                self.repetition = v
+            elif name == "taste":
+                self.taste = v
+            elif name == "continuity":
+                self.continuity = v
+
     def commit(self):
         with self.lock:
             if not self.waiting_for_commit or not self.current_episode_id:
                 logger.info("No pending feedback episode to commit.")
                 return
             grade = self.latest_grade if self.latest_grade is not None else 0
-            self.datastore.finalize_episode(self.current_episode_id, grade)
+            feedback = {
+                "coherence": self.coherence,
+                "repetition": self.repetition,
+                "taste": self.taste,
+                "continuity": self.continuity,
+            }
+            self.datastore.finalize_episode(self.current_episode_id, grade, feedback=feedback)
             logger.info(f"Feedback episode {self.current_episode_id} finalized with grade={grade}.")
             self.current_episode_id = None
             self.waiting_for_commit = False
@@ -418,6 +452,7 @@ def main():
                 command_queue=cmd_queue,
                 commit_cb=(feedback_manager.commit if feedback_manager else None),
                 grade_cb=(feedback_manager.set_grade if feedback_manager else None),
+                feedback_param_cb=(feedback_manager.set_feedback_param if feedback_manager else None),
             )
             # Start OSC server first, then pull current dial state from Max
             osc.start()
