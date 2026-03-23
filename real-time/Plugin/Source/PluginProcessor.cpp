@@ -642,13 +642,18 @@ void AriaBridgeAudioProcessor::launchBackendProcessIfNeeded()
         return;
 
     juce::File exeDir = juce::File::getSpecialLocation(juce::File::currentExecutableFile).getParentDirectory();
+
+   #if JUCE_MAC
+    juce::File launcherScript = exeDir.getChildFile("start.sh");
+   #else
     juce::File launcherScript = exeDir.getChildFile("start.bat");
+   #endif
 
     if (! launcherScript.existsAsFile())
     {
         {
             const juce::ScopedLock lock(oscStateLock);
-            currentStatus = "ERROR: start.bat not found next to exe";
+            currentStatus = "ERROR: " + launcherScript.getFileName() + " not found";
         }
 
         triggerAsyncUpdate();
@@ -660,7 +665,12 @@ void AriaBridgeAudioProcessor::launchBackendProcessIfNeeded()
         lastLog = "Launching backend: " + launcherScript.getFullPathName();
     }
 
+   #if JUCE_MAC
+    juce::String command = "/bin/bash \"" + launcherScript.getFullPathName() + "\"";
+   #else
     juce::String command = "cmd.exe /c \"" + launcherScript.getFullPathName() + "\"";
+   #endif
+
     backendProcess.start(command);
     triggerAsyncUpdate();
 }
