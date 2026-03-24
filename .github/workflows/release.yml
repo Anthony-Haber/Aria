@@ -101,6 +101,9 @@ jobs:
               Copy-Item $_.FullName -Destination "staging\backend" -Recurse -Force
             }
 
+          Copy-Item "aria" "staging\backend\aria" -Recurse -Force
+          Copy-Item "config" "staging\backend\config" -Recurse -Force
+
       - name: Zip
         shell: powershell
         run: |
@@ -146,6 +149,9 @@ jobs:
               cp -r "$item" staging/backend/
             fi
           done
+
+          cp -r aria staging/backend/aria
+          cp -r config staging/backend/config
 
       - name: Zip
         run: |
