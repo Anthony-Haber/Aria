@@ -11,6 +11,7 @@ constexpr int oscReceivePort = 9001;
 constexpr const char* oscHost = "127.0.0.1";
 constexpr int maxOscPacketSize = 2048;
 constexpr auto controlCount = static_cast<int>(AriaBridgeAudioProcessor::ControlId::count);
+constexpr auto knobCount = static_cast<int>(AriaBridgeAudioProcessor::ControlId::record);
 
 struct ControlSpec
 {
@@ -20,7 +21,7 @@ struct ControlSpec
     bool integerOnly;
 };
 
-constexpr std::array<ControlSpec, controlCount> controlSpecs {{
+constexpr std::array<ControlSpec, knobCount> controlSpecs {{
     { "/aria/temp", 0.1, 2.0, false },
     { "/aria/top_p", 0.1, 1.0, false },
     { "/aria/min_p", 0.0, 0.3, false },
@@ -279,7 +280,7 @@ void AriaBridgeAudioProcessor::processBlock(juce::AudioBuffer<float>& audioBuffe
     juce::ScopedNoDenormals noDenormals;
 
     for (const auto metadata : midiMessages)
-        handleMidiControllerMessage(metadata.getMessage());
+        handleMidiMessage(metadata.getMessage());
 
     audioBuffer.clear();
 }
@@ -449,6 +450,12 @@ int AriaBridgeAudioProcessor::getMappedMidiCC(ControlId controlId) const
     return midiMappings[static_cast<size_t>(toIndex(controlId))];
 }
 
+int AriaBridgeAudioProcessor::getMappedButtonMidi(ControlId buttonId) const
+{
+    const juce::SpinLock::ScopedLockType lock(midiMappingLock);
+    return midiMappings[static_cast<size_t>(toIndex(buttonId))];
+}
+
 bool AriaBridgeAudioProcessor::isLearningControl(ControlId controlId) const
 {
     return learningControlIndex.load() == toIndex(controlId);
@@ -481,14 +488,14 @@ void AriaBridgeAudioProcessor::handleAsyncUpdate()
 
     if (activeEditor != nullptr)
     {
-        for (int index = 0; index < controlCount; ++index)
+        for (int index = 0; index < knobCount; ++index)
         {
             if (midiValueIsDirty[static_cast<size_t>(index)])
                 activeEditor->applyMappedControlValue(static_cast<ControlId>(index), midiValuesToApply[static_cast<size_t>(index)]);
         }
     }
 
-    for (int index = 0; index < controlCount; ++index)
+    for (int index = 0; index < knobCount; ++index)
     {
         if (! midiValueIsDirty[static_cast<size_t>(index)])
             continue;
@@ -499,6 +506,15 @@ void AriaBridgeAudioProcessor::handleAsyncUpdate()
             sendOSC(controlAddress(controlId), juce::roundToInt(midiValuesToApply[static_cast<size_t>(index)]));
         else
             sendOSC(controlAddress(controlId), static_cast<float>(midiValuesToApply[static_cast<size_t>(index)]));
+    }
+
+    if (activeEditor != nullptr)
+    {
+        for (int index = knobCount; index < controlCount; ++index)
+        {
+            if (midiValueIsDirty[static_cast<size_t>(index)])
+                activeEditor->applyMidiButtonTrigger(static_cast<ControlId>(index));
+        }
     }
 
     if (activeEditor != nullptr)
@@ -586,48 +602,92 @@ void AriaBridgeAudioProcessor::handleIncomingOSCMessage(const void* data, size_t
 
 void AriaBridgeAudioProcessor::handleIncomingMidiMessage(juce::MidiInput*, const juce::MidiMessage& message)
 {
-    handleMidiControllerMessage(message);
+    handleMidiMessage(message);
 }
 
-void AriaBridgeAudioProcessor::handleMidiControllerMessage(const juce::MidiMessage& message)
+void AriaBridgeAudioProcessor::handleMidiMessage(const juce::MidiMessage& message)
 {
-    if (! message.isController())
-        return;
-
-    const auto ccNumber = message.getControllerNumber();
-    const auto ccValue = message.getControllerValue();
     const auto learningIndex = learningControlIndex.load();
     bool shouldTrigger = false;
 
+    if (message.isController())
     {
-        const juce::SpinLock::ScopedLockType lock(midiMappingLock);
+        const auto ccNumber = message.getControllerNumber();
+        const auto ccValue = message.getControllerValue();
 
-        if (juce::isPositiveAndBelow(learningIndex, controlCount))
         {
-            for (auto& mapping : midiMappings)
-            {
-                if (mapping == ccNumber)
-                    mapping = -1;
-            }
+            const juce::SpinLock::ScopedLockType lock(midiMappingLock);
 
-            midiMappings[static_cast<size_t>(learningIndex)] = ccNumber;
-            pendingMidiValues[static_cast<size_t>(learningIndex)] =
-                midiValueToControlValue(static_cast<ControlId>(learningIndex), ccValue);
-            pendingMidiValueDirty[static_cast<size_t>(learningIndex)] = true;
-            learningControlIndex.store(-1);
-            shouldTrigger = true;
-        }
-        else
-        {
-            for (int index = 0; index < controlCount; ++index)
+            if (juce::isPositiveAndBelow(learningIndex, controlCount))
             {
-                if (midiMappings[static_cast<size_t>(index)] != ccNumber)
-                    continue;
+                for (auto& mapping : midiMappings)
+                {
+                    if (mapping == ccNumber)
+                        mapping = -1;
+                }
 
-                pendingMidiValues[static_cast<size_t>(index)] =
-                    midiValueToControlValue(static_cast<ControlId>(index), ccValue);
-                pendingMidiValueDirty[static_cast<size_t>(index)] = true;
+                midiMappings[static_cast<size_t>(learningIndex)] = ccNumber;
+
+                if (learningIndex < knobCount)
+                {
+                    pendingMidiValues[static_cast<size_t>(learningIndex)] =
+                        midiValueToControlValue(static_cast<ControlId>(learningIndex), ccValue);
+                }
+
+                pendingMidiValueDirty[static_cast<size_t>(learningIndex)] = true;
+                learningControlIndex.store(-1);
                 shouldTrigger = true;
+            }
+            else
+            {
+                for (int index = 0; index < controlCount; ++index)
+                {
+                    if (midiMappings[static_cast<size_t>(index)] != ccNumber)
+                        continue;
+
+                    if (index < knobCount)
+                    {
+                        pendingMidiValues[static_cast<size_t>(index)] =
+                            midiValueToControlValue(static_cast<ControlId>(index), ccValue);
+                    }
+
+                    pendingMidiValueDirty[static_cast<size_t>(index)] = true;
+                    shouldTrigger = true;
+                }
+            }
+        }
+    }
+    else if (message.isNoteOn())
+    {
+        const auto noteNumber = message.getNoteNumber();
+        const auto encodedNote = 128 + noteNumber;
+
+        {
+            const juce::SpinLock::ScopedLockType lock(midiMappingLock);
+
+            if (juce::isPositiveAndBelow(learningIndex, controlCount) && learningIndex >= knobCount)
+            {
+                for (auto& mapping : midiMappings)
+                {
+                    if (mapping == encodedNote)
+                        mapping = -1;
+                }
+
+                midiMappings[static_cast<size_t>(learningIndex)] = encodedNote;
+                pendingMidiValueDirty[static_cast<size_t>(learningIndex)] = true;
+                learningControlIndex.store(-1);
+                shouldTrigger = true;
+            }
+            else
+            {
+                for (int index = knobCount; index < controlCount; ++index)
+                {
+                    if (midiMappings[static_cast<size_t>(index)] != encodedNote)
+                        continue;
+
+                    pendingMidiValueDirty[static_cast<size_t>(index)] = true;
+                    shouldTrigger = true;
+                }
             }
         }
     }

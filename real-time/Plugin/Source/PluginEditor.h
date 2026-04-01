@@ -19,6 +19,23 @@ public:
     }
 };
 
+class MidiLearnButton final : public juce::TextButton
+{
+public:
+    std::function<void()> onContextMenuRequested;
+
+    void mouseDown(const juce::MouseEvent& event) override
+    {
+        if (event.mods.isPopupMenu() && onContextMenuRequested != nullptr)
+        {
+            onContextMenuRequested();
+            return;
+        }
+
+        juce::TextButton::mouseDown(event);
+    }
+};
+
 class AriaLookAndFeel final : public juce::LookAndFeel_V4
 {
 public:
@@ -55,6 +72,7 @@ public:
     void resized() override;
     void refreshStatusDisplay();
     void applyMappedControlValue(AriaBridgeAudioProcessor::ControlId controlId, double value);
+    void applyMidiButtonTrigger(AriaBridgeAudioProcessor::ControlId buttonId);
 
 private:
     void configureFloatKnob(LearnableSlider& slider,
@@ -77,13 +95,15 @@ private:
                           const juce::String& oscAddress,
                           AriaBridgeAudioProcessor::ControlId controlId);
 
-    void configureActionButton(juce::TextButton& button, const juce::String& text);
+    void configureActionButton(MidiLearnButton& button, const juce::String& text);
     void configureNameLabel(juce::Label& label, const juce::String& text);
     void configureValueLabel(juce::Label& label);
     void updateRecordButtonAppearance();
     void refreshValueLabel(AriaBridgeAudioProcessor::ControlId controlId);
     void showSliderContextMenu(AriaBridgeAudioProcessor::ControlId controlId);
+    void showButtonContextMenu(AriaBridgeAudioProcessor::ControlId buttonId);
     LearnableSlider& getSliderForControl(AriaBridgeAudioProcessor::ControlId controlId);
+    MidiLearnButton& getButtonForControl(AriaBridgeAudioProcessor::ControlId buttonId);
     juce::Label& getValueLabelForControl(AriaBridgeAudioProcessor::ControlId controlId);
     void configureStandaloneWindowIfNeeded();
 
@@ -122,11 +142,11 @@ private:
     juce::Label continuityValueLabel;
     juce::Label gradeValueLabel;
 
-    juce::TextButton recordButton;
-    juce::TextButton syncButton;
-    juce::TextButton commitButton;
-    juce::TextButton playButton;
-    juce::TextButton cancelButton;
+    MidiLearnButton recordButton;
+    MidiLearnButton syncButton;
+    MidiLearnButton commitButton;
+    MidiLearnButton playButton;
+    MidiLearnButton cancelButton;
 
     juce::Label statusLabel;
     juce::Label logLabel;

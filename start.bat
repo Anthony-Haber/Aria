@@ -1,7 +1,7 @@
 @echo off
 setlocal
 
-cd /d "%~dp0backend"
+cd /d "%~dp0real-time"
 
 if not exist "%~dp0venv\Scripts\python.exe" (
     echo ERROR: Virtual environment not found.
@@ -22,5 +22,8 @@ if not exist "%~dp0models\model-gen.safetensors" (
 "%~dp0venv\Scripts\python.exe" ableton_bridge.py ^
   plugin ^
   --feedback ^
-  --data-dir "%~dp0data" ^
-  --checkpoint "%~dp0models\model-gen.safetensors"
+  --data-dir "C:\Code\Aria Feedback"^
+  --checkpoint "%~dp0models\model-gen.safetensors" ^
+  --in "ARIA_IN 3" ^
+  --out "ARIA_OUT 5" ^
+  --device "cuda"

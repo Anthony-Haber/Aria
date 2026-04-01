@@ -21,6 +21,11 @@ public:
         repetition,
         continuity,
         grade,
+        record,
+        sync,
+        commit,
+        play,
+        cancel,
         count
     };
 
@@ -70,6 +75,7 @@ public:
     void beginMidiLearn(ControlId controlId);
     void clearMidiMapping(ControlId controlId);
     int getMappedMidiCC(ControlId controlId) const;
+    int getMappedButtonMidi(ControlId buttonId) const;
     bool isLearningControl(ControlId controlId) const;
 
     OSCStateSnapshot getOSCStateSnapshot() const;
@@ -83,7 +89,7 @@ private:
     void timerCallback() override;
     void handleIncomingOSCMessage(const void* data, size_t sizeInBytes);
     void handleIncomingMidiMessage(juce::MidiInput* source, const juce::MidiMessage& message) override;
-    void handleMidiControllerMessage(const juce::MidiMessage& message);
+    void handleMidiMessage(const juce::MidiMessage& message);
     void launchBackendProcessIfNeeded();
     void startStandaloneMidiInputs();
     void stopStandaloneMidiInputs();

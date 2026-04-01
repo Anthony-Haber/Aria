@@ -149,6 +149,12 @@ AriaBridgeAudioProcessorEditor::AriaBridgeAudioProcessorEditor(AriaBridgeAudioPr
     configureActionButton(playButton, "play");
     configureActionButton(cancelButton, "cancel");
 
+    recordButton.onContextMenuRequested = [this] { showButtonContextMenu(AriaBridgeAudioProcessor::ControlId::record); };
+    syncButton.onContextMenuRequested   = [this] { showButtonContextMenu(AriaBridgeAudioProcessor::ControlId::sync); };
+    commitButton.onContextMenuRequested = [this] { showButtonContextMenu(AriaBridgeAudioProcessor::ControlId::commit); };
+    playButton.onContextMenuRequested   = [this] { showButtonContextMenu(AriaBridgeAudioProcessor::ControlId::play); };
+    cancelButton.onContextMenuRequested = [this] { showButtonContextMenu(AriaBridgeAudioProcessor::ControlId::cancel); };
+
     recordButton.setClickingTogglesState(true);
     recordButton.onClick = [this]
     {
@@ -218,7 +224,10 @@ void AriaBridgeAudioProcessorEditor::paint(juce::Graphics& g)
     g.setColour(isConnected ? juce::Colours::green : disconnectedColour);
     g.fillEllipse(dotBounds);
 
-    for (int index = 0; index < static_cast<int>(AriaBridgeAudioProcessor::ControlId::count); ++index)
+    const auto buttonBase = static_cast<int>(AriaBridgeAudioProcessor::ControlId::record);
+    const auto totalCount = static_cast<int>(AriaBridgeAudioProcessor::ControlId::count);
+
+    for (int index = 0; index < buttonBase; ++index)
     {
         const auto controlId = static_cast<AriaBridgeAudioProcessor::ControlId>(index);
 
@@ -228,6 +237,18 @@ void AriaBridgeAudioProcessorEditor::paint(juce::Graphics& g)
         auto ringBounds = getSliderForControl(controlId).getBounds().toFloat().expanded(4.0f);
         g.setColour(learningColour);
         g.drawEllipse(ringBounds, 3.0f);
+    }
+
+    for (int index = buttonBase; index < totalCount; ++index)
+    {
+        const auto controlId = static_cast<AriaBridgeAudioProcessor::ControlId>(index);
+
+        if (! audioProcessor.isLearningControl(controlId))
+            continue;
+
+        auto rectBounds = getButtonForControl(controlId).getBounds().toFloat().reduced(1.0f);
+        g.setColour(learningColour);
+        g.drawRoundedRectangle(rectBounds, 8.0f, 3.0f);
     }
 }
 
@@ -405,7 +426,7 @@ void AriaBridgeAudioProcessorEditor::configureIntKnob(LearnableSlider& slider,
     refreshValueLabel(controlId);
 }
 
-void AriaBridgeAudioProcessorEditor::configureActionButton(juce::TextButton& button, const juce::String& text)
+void AriaBridgeAudioProcessorEditor::configureActionButton(MidiLearnButton& button, const juce::String& text)
 {
     button.setButtonText(text);
     button.setColour(juce::TextButton::buttonColourId, buttonColour);
@@ -509,6 +530,56 @@ juce::Label& AriaBridgeAudioProcessorEditor::getValueLabelForControl(AriaBridgeA
 
     jassertfalse;
     return tempValueLabel;
+}
+
+void AriaBridgeAudioProcessorEditor::applyMidiButtonTrigger(AriaBridgeAudioProcessor::ControlId buttonId)
+{
+    getButtonForControl(buttonId).triggerClick();
+}
+
+void AriaBridgeAudioProcessorEditor::showButtonContextMenu(AriaBridgeAudioProcessor::ControlId buttonId)
+{
+    juce::PopupMenu menu;
+    menu.addItem(1, "MIDI Learn");
+
+    const auto mappedMidi = audioProcessor.getMappedButtonMidi(buttonId);
+
+    if (mappedMidi >= 0)
+    {
+        juce::String clearLabel;
+
+        if (mappedMidi >= 128)
+            clearLabel = "Clear MIDI mapping (Note " + juce::String(mappedMidi - 128) + ")";
+        else
+            clearLabel = "Clear MIDI mapping (CC " + juce::String(mappedMidi) + ")";
+
+        menu.addItem(2, clearLabel);
+    }
+
+    menu.showMenuAsync(juce::PopupMenu::Options(),
+                       [this, buttonId] (int result)
+                       {
+                           if (result == 1)
+                               audioProcessor.beginMidiLearn(buttonId);
+                           else if (result == 2)
+                               audioProcessor.clearMidiMapping(buttonId);
+                       });
+}
+
+MidiLearnButton& AriaBridgeAudioProcessorEditor::getButtonForControl(AriaBridgeAudioProcessor::ControlId buttonId)
+{
+    switch (buttonId)
+    {
+        case AriaBridgeAudioProcessor::ControlId::record: return recordButton;
+        case AriaBridgeAudioProcessor::ControlId::sync:   return syncButton;
+        case AriaBridgeAudioProcessor::ControlId::commit: return commitButton;
+        case AriaBridgeAudioProcessor::ControlId::play:   return playButton;
+        case AriaBridgeAudioProcessor::ControlId::cancel: return cancelButton;
+        default: break;
+    }
+
+    jassertfalse;
+    return recordButton;
 }
 
 void AriaBridgeAudioProcessorEditor::configureStandaloneWindowIfNeeded()
