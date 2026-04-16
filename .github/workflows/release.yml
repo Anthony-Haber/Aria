@@ -63,6 +63,12 @@ jobs:
         working-directory: front-end
         run: npm install
 
+      - name: Prepare resource folders for electron-builder
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path models   | Out-Null
+          New-Item -ItemType Directory -Force -Path feedback | Out-Null
+
       - name: Build AriaLauncher.exe
         working-directory: front-end
         run: npm run build

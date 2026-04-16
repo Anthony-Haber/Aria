@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "description": "Launcher for Aria Bridge",
   "author": "Anthony-Haber",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Anthony-Haber/Aria.git"
+  },
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -27,9 +31,9 @@
       { "from": "../aria_backend.exe",   "to": "aria_backend.exe",   "filter": ["**"] },
       { "from": "../Aria Bridge.exe",    "to": "Aria Bridge.exe",    "filter": ["**"] },
       { "from": "../real-time/Plugin/build/AriaBridge_artefacts/Release/VST3/Aria Bridge.vst3", "to": "Aria Bridge.vst3" },
-      { "from": "../models",    "to": "models"    },
-      { "from": "../feedback",  "to": "feedback"  },
-      { "from": "../ableton",   "to": "ableton"   }
+      { "from": "../models",    "to": "models",   "filter": ["**"], "optional": true },
+      { "from": "../feedback",  "to": "feedback", "filter": ["**"], "optional": true },
+      { "from": "../ableton",   "to": "ableton",  "filter": ["**"], "optional": true }
     ]
   }
 }
