@@ -61,7 +61,8 @@ public:
                         bool isButtonDown) override;
 };
 
-class AriaBridgeAudioProcessorEditor final : public juce::AudioProcessorEditor
+class AriaBridgeAudioProcessorEditor final : public juce::AudioProcessorEditor,
+                                             private juce::Timer
 {
 public:
     explicit AriaBridgeAudioProcessorEditor(AriaBridgeAudioProcessor&);
@@ -73,6 +74,10 @@ public:
     void refreshStatusDisplay();
     void applyMappedControlValue(AriaBridgeAudioProcessor::ControlId controlId, double value);
     void applyMidiButtonTrigger(AriaBridgeAudioProcessor::ControlId buttonId);
+    void setGenerationActive(bool active);
+    void setPlaybackDuration(float seconds);
+    void setPlaybackProgress(float value);
+    void stopPlayback();
 
 private:
     void configureFloatKnob(LearnableSlider& slider,
@@ -106,6 +111,7 @@ private:
     MidiLearnButton& getButtonForControl(AriaBridgeAudioProcessor::ControlId buttonId);
     juce::Label& getValueLabelForControl(AriaBridgeAudioProcessor::ControlId controlId);
     void configureStandaloneWindowIfNeeded();
+    void timerCallback() override;
 
     AriaBridgeAudioProcessor& audioProcessor;
 
@@ -151,9 +157,19 @@ private:
     juce::Label statusLabel;
     juce::Label logLabel;
 
+    double generationProgress = -1.0;
+    double playbackProgress = 0.0;
+    double playbackTotalDuration = 0.0;
+    int generationElapsedSec = 0;
+    juce::ProgressBar generationBar { generationProgress };
+    juce::ProgressBar playbackBar { playbackProgress };
+    juce::Label generationLabel;
+    juce::Label playbackLabel;
+
     AriaLookAndFeel lookAndFeel;
     juce::ComponentBoundsConstrainer windowConstrainer;
     bool standaloneWindowConfigured = false;
     bool isRecordEnabled = false;
     bool isConnected = false;
+    bool isPlaying = false;
 };

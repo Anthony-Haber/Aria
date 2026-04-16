@@ -329,48 +329,30 @@ class AbletonBridge:
             raise ImportError("mido is required. Install with: pip install mido")
 
         # Input port
-        try:
-            # Try exact name first, then try with port number suffix
-            in_port_name = self.in_port_name
-            try:
-                self.in_port = mido.open_input(in_port_name)
-            except (OSError, ValueError):
-                # Port not found, try matching with available ports
-                available = mido.get_input_names()
-                matched = [p for p in available if p.startswith(in_port_name)]
-                if matched:
-                    in_port_name = matched[0]
-                    self.in_port = mido.open_input(in_port_name)
-                else:
-                    raise
-
-            logger.info(f"Input port opened: {in_port_name}")
-        except Exception as e:
-            logger.error(f"Failed to open input port '{self.in_port_name}': {e}")
-            logger.info("Listing available input ports: " + ", ".join(mido.get_input_names()))
-            raise
+        available_in = mido.get_input_names()
+        matched_in = [p for p in available_in if p.lower().startswith(self.in_port_name.lower())]
+        if not matched_in:
+            raise RuntimeError(
+                f"Could not find a MIDI input port starting with '{self.in_port_name}'. "
+                f"Make sure loopMIDI is running and the port is created. "
+                f"Available ports: {available_in}"
+            )
+        in_port_name = matched_in[0]
+        self.in_port = mido.open_input(in_port_name)
+        logger.info(f"Input port opened: {in_port_name}")
 
         # Output port
-        try:
-            # Try exact name first, then try with port number suffix
-            out_port_name = self.out_port_name
-            try:
-                self.out_port = mido.open_output(out_port_name)
-            except (OSError, ValueError):
-                # Port not found, try matching with available ports
-                available = mido.get_output_names()
-                matched = [p for p in available if p.startswith(out_port_name)]
-                if matched:
-                    out_port_name = matched[0]
-                    self.out_port = mido.open_output(out_port_name)
-                else:
-                    raise
-
-            logger.info(f"Output port opened: {out_port_name}")
-        except Exception as e:
-            logger.error(f"Failed to open output port '{self.out_port_name}': {e}")
-            logger.info("Listing available output ports: " + ", ".join(mido.get_output_names()))
-            raise
+        available_out = mido.get_output_names()
+        matched_out = [p for p in available_out if p.lower().startswith(self.out_port_name.lower())]
+        if not matched_out:
+            raise RuntimeError(
+                f"Could not find a MIDI output port starting with '{self.out_port_name}'. "
+                f"Make sure loopMIDI is running and the port is created. "
+                f"Available ports: {available_out}"
+            )
+        out_port_name = matched_out[0]
+        self.out_port = mido.open_output(out_port_name)
+        logger.info(f"Output port opened: {out_port_name}")
 
     def _input_loop(self):
         """Read live MIDI input and add to rolling buffer."""

@@ -7,6 +7,7 @@ into a prompt for Aria with timing preserved from the captured deltas.
 
 from __future__ import annotations
 
+import ctypes
 import logging
 import os
 import statistics
@@ -20,6 +21,10 @@ from core.midi_buffer import TimestampedMidiMsg
 from core.prompt_midi import buffer_to_tempfile_midi
 
 logger = logging.getLogger(__name__)
+
+
+class _GenerationCanceled(Exception):
+    pass
 
 
 class KeyboardToggle:
@@ -86,15 +91,27 @@ def infer_bpm_from_onsets(messages: Iterable[TimestampedMidiMsg]) -> Optional[fl
     return max(30.0, min(bpm, 240.0))
 
 
-def _play_midi_file(midi_path: str, out_port) -> Tuple[int, float]:
+def _play_midi_file(midi_path: str, out_port, progress_cb=None, duration_cb=None, stop_event=None) -> Tuple[int, float]:
     import mido
     mid = mido.MidiFile(midi_path)
     total_time = mid.length
+    if duration_cb and total_time > 0:
+        duration_cb(total_time)
     sent = 0
+    elapsed = 0.0
+    last_report = -1.0
     for msg in mid.play():
+        if stop_event and stop_event.is_set():
+            logger.info("[playback] Stop event received — MIDI feed halted")
+            print("[playback] Stop event received — MIDI feed halted")
+            break
+        elapsed += msg.time
         if hasattr(msg, "type") and msg.type in ("note_on", "note_off", "control_change"):
             out_port.send(msg)
             sent += 1
+        if progress_cb and total_time > 0 and elapsed - last_report >= 0.05:
+            progress_cb(min(1.0, elapsed / total_time))
+            last_report = elapsed
     return sent, total_time
 
 
@@ -121,6 +138,11 @@ class ManualModeSession:
         osc_status_cb=None,
         osc_log_cb=None,
         osc_params_cb=None,
+        osc_generation_start_cb=None,
+        osc_generation_done_cb=None,
+        osc_playback_progress_cb=None,
+        osc_playback_stopped_cb=None,
+        osc_playback_duration_cb=None,
         play_gate: bool = False,
         feedback_manager=None,
     ):
@@ -144,6 +166,11 @@ class ManualModeSession:
         self.osc_status_cb = osc_status_cb
         self.osc_log_cb = osc_log_cb
         self.osc_params_cb = osc_params_cb
+        self.osc_generation_start_cb = osc_generation_start_cb
+        self.osc_generation_done_cb = osc_generation_done_cb
+        self.osc_playback_progress_cb = osc_playback_progress_cb
+        self.osc_playback_stopped_cb = osc_playback_stopped_cb
+        self.osc_playback_duration_cb = osc_playback_duration_cb
         # Gate playback to explicit PLAY command/key to keep manual + OSC paths consistent.
         self.play_gate = True
         self.feedback_manager = feedback_manager
@@ -153,6 +180,9 @@ class ManualModeSession:
         self.state = "IDLE"
 
         self.cancel_event = threading.Event()
+        self.playback_cancel_event = threading.Event()
+        self.generation_cancel_event = threading.Event()
+        self.skip_pending_event = threading.Event()
         self.recording_flag = threading.Event()
         self.recorded: List[TimestampedMidiMsg] = []
         self.start_time: Optional[float] = None
@@ -172,16 +202,17 @@ class ManualModeSession:
 
     @staticmethod
     def _resolve_port(name: str, kind: str) -> str:
-        """Return the exact port name, falling back to prefix match (handles 'ARIA_IN 0', etc.)."""
+        """Return the first port whose name starts with 'name' (case-insensitive)."""
         import mido
         available = mido.get_input_names() if kind == "input" else mido.get_output_names()
-        if name in available:
-            return name
-        matched = [p for p in available if p.startswith(name)]
+        matched = [p for p in available if p.lower().startswith(name.lower())]
         if matched:
-            logger.info(f"Port '{name}' not found exactly; using '{matched[0]}'")
             return matched[0]
-        return name  # let mido raise the real error with the original name
+        raise RuntimeError(
+            f"Could not find a MIDI {kind} port starting with '{name}'. "
+            f"Make sure loopMIDI is running and the port is created. "
+            f"Available ports: {available}"
+        )
 
     def _open_ports(self) -> None:
         import mido
@@ -282,8 +313,10 @@ class ManualModeSession:
                 elif cmd == "cancel":
                     if stop_key_event:
                         stop_key_event.set()
+                    self.generation_cancel_event.set()
+                    self.skip_pending_event.set()
                     self.recorded.clear()
-                    self._log_ui("Recording canceled")
+                    self._log_ui("Canceled")
                     if self.session_state:
                         self.session_state.set_status("IDLE")
                         self.session_state.has_pending_output = False
@@ -291,6 +324,9 @@ class ManualModeSession:
                     if self.session_state and self.session_state.last_output_path and self.out_port:
                         self._log_ui("Playing last output (UI)")
                         _play_midi_file(self.session_state.last_output_path, self.out_port)
+                elif cmd == "cancel_playback":
+                    self.playback_cancel_event.set()
+                    self._log_ui("Playback canceled")
                 elif cmd == "play":
                     if play_event:
                         play_event.set()
@@ -340,7 +376,10 @@ class ManualModeSession:
             logger.warning("[manual] Play requested but output port is unavailable.")
             return False
         self._log_ui("Play requested")
-        sent, total = _play_midi_file(path, self.out_port)
+        self.playback_cancel_event.clear()
+        sent, total = _play_midi_file(path, self.out_port, progress_cb=self.osc_playback_progress_cb, duration_cb=self.osc_playback_duration_cb, stop_event=self.playback_cancel_event)
+        if self.osc_playback_stopped_cb:
+            self.osc_playback_stopped_cb()
         logger.info(f"[manual] Played pending MIDI ({sent} msgs, {total:.2f}s)")
         if self.osc_log_cb:
             self.osc_log_cb(f"Played pending MIDI ({sent} msgs, {total:.2f}s)")
@@ -368,13 +407,32 @@ class ManualModeSession:
 
         threading.Thread(target=_wait_keyboard_play, daemon=True).start()
 
-        while not self.cancel_event.is_set():
+        while not self.cancel_event.is_set() and not self.skip_pending_event.is_set():
             self._drain_commands(play_event=play_event)
             if play_event.is_set():
                 self._handle_play_request()
                 break
             time.sleep(0.05)
-        # Ensure we leave READY state even if canceled without playback.
+
+        if self.skip_pending_event.is_set():
+            logger.info("[manual] Pending output canceled — returning to record")
+            print("[manual] Pending output canceled — returning to record")
+            self.skip_pending_event.clear()
+            if self.pending_output_path:
+                try:
+                    os.unlink(self.pending_output_path)
+                except Exception:
+                    pass
+            self.pending_output_path = None
+            if self.session_state:
+                self.session_state.has_pending_output = False
+                self.session_state.set_status("IDLE")
+                self.session_state.set_last_output(None)
+            if self.osc_status_cb:
+                self.osc_status_cb("IDLE")
+            self._log_ui("Pending output discarded — ready to record")
+
+        # Ensure we leave READY state if globally canceled.
         if self.cancel_event.is_set() and self.session_state:
             self.session_state.has_pending_output = False
             self.session_state.set_status("IDLE")
@@ -459,15 +517,68 @@ class ManualModeSession:
         if tokens is not None:
             logger.info(f"[GEN] max_new_tokens={tokens}")
             self._log_ui(f"Max tokens -> {tokens}")
-        generated_path = self.aria_engine.generate(
-            prompt_midi_path=prompt_midi_path,
-            prompt_duration_s=max(1, int(duration)),
-            horizon_s=self.gen_seconds,
-            temperature=temp,
-            top_p=top_p,
-            min_p=min_p,
-            max_new_tokens=tokens,
-        )
+        self.generation_cancel_event.clear()
+        if self.osc_generation_start_cb:
+            self.osc_generation_start_cb()
+
+        gen_result: List[Optional[str]] = [None]
+        gen_thread_id: List[Optional[int]] = [None]
+
+        def _run_generate():
+            gen_thread_id[0] = threading.current_thread().ident
+            try:
+                gen_result[0] = self.aria_engine.generate(
+                    prompt_midi_path=prompt_midi_path,
+                    prompt_duration_s=max(1, int(duration)),
+                    horizon_s=self.gen_seconds,
+                    temperature=temp,
+                    top_p=top_p,
+                    min_p=min_p,
+                    max_new_tokens=tokens,
+                )
+            except _GenerationCanceled:
+                logger.info("[manual] Generation interrupted mid-token")
+                print("[manual] Generation interrupted mid-token")
+            except Exception as e:
+                logger.exception(f"[manual] Generation error: {e}")
+
+        gen_thread = threading.Thread(target=_run_generate, daemon=True)
+        gen_thread.start()
+
+        while gen_thread.is_alive():
+            if self.generation_cancel_event.is_set() and gen_thread_id[0] is not None:
+                logger.info("[manual] Injecting cancel into generation thread")
+                print("[manual] Cancel received — interrupting generation")
+                ctypes.pythonapi.PyThreadState_SetAsyncExc(
+                    ctypes.c_ulong(gen_thread_id[0]),
+                    ctypes.py_object(_GenerationCanceled),
+                )
+                gen_thread_id[0] = None
+            time.sleep(0.05)
+
+        gen_thread.join(timeout=10.0)
+
+        if self.osc_generation_done_cb:
+            self.osc_generation_done_cb()
+
+        generated_path = gen_result[0]
+
+        if self.generation_cancel_event.is_set():
+            logger.info("[manual] Generation canceled — discarding output")
+            print("[manual] Generation canceled — discarding output")
+            self.generation_cancel_event.clear()
+            if generated_path:
+                try:
+                    os.unlink(generated_path)
+                except Exception:
+                    pass
+            if self.session_state:
+                self.session_state.set_status("IDLE")
+                self.session_state.has_pending_output = False
+            if self.osc_status_cb:
+                self.osc_status_cb("IDLE")
+            self._log_ui("Generation canceled — ready to record")
+            return
         gen_time = time.time() - gen_start
         logger.info(f"[manual] Generation finished in {gen_time:.2f}s")
         if self.session_state:
@@ -508,7 +619,10 @@ class ManualModeSession:
                     logger.info("[manual] Playback canceled.")
                     self._log_ui("Playback canceled")
                     return
-            sent, total = _play_midi_file(generated_path, self.out_port)
+            self.playback_cancel_event.clear()
+            sent, total = _play_midi_file(generated_path, self.out_port, progress_cb=self.osc_playback_progress_cb, duration_cb=self.osc_playback_duration_cb, stop_event=self.playback_cancel_event)
+            if self.osc_playback_stopped_cb:
+                self.osc_playback_stopped_cb()
             logger.info(f"[manual] Played generated MIDI ({sent} msgs, {total:.2f}s)")
             self._log_ui(f"Played generated MIDI ({sent} msgs, {total:.2f}s)")
             if self.session_state:

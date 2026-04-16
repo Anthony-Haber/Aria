@@ -174,7 +174,12 @@ AriaBridgeAudioProcessorEditor::AriaBridgeAudioProcessorEditor(AriaBridgeAudioPr
 
     commitButton.onClick = [this] { audioProcessor.sendOSC("/aria/commit"); };
     playButton.onClick = [this] { audioProcessor.sendOSC("/aria/play"); };
-    cancelButton.onClick = [this] { audioProcessor.sendOSC("/aria/cancel"); };
+    cancelButton.onClick = [this]
+    {
+        audioProcessor.sendOSC("/aria/cancel");
+        if (isPlaying)
+            audioProcessor.sendOSC("/cancel_playback");
+    };
 
     statusLabel.setJustificationType(juce::Justification::centredLeft);
     statusLabel.setColour(juce::Label::textColourId, textColour);
@@ -185,6 +190,26 @@ AriaBridgeAudioProcessorEditor::AriaBridgeAudioProcessorEditor(AriaBridgeAudioPr
     logLabel.setColour(juce::Label::textColourId, mutedTextColour);
     logLabel.setFont(juce::Font(12.5f));
     addAndMakeVisible(logLabel);
+
+    generationLabel.setText("Generating...", juce::dontSendNotification);
+    generationLabel.setJustificationType(juce::Justification::centred);
+    generationLabel.setColour(juce::Label::textColourId, mutedTextColour);
+    generationLabel.setFont(juce::Font(11.0f));
+    addChildComponent(generationLabel);
+
+    generationBar.setColour(juce::ProgressBar::backgroundColourId, buttonColour);
+    generationBar.setColour(juce::ProgressBar::foregroundColourId, accentColour);
+    addChildComponent(generationBar);
+
+    playbackLabel.setText("Playing...", juce::dontSendNotification);
+    playbackLabel.setJustificationType(juce::Justification::centred);
+    playbackLabel.setColour(juce::Label::textColourId, mutedTextColour);
+    playbackLabel.setFont(juce::Font(11.0f));
+    addChildComponent(playbackLabel);
+
+    playbackBar.setColour(juce::ProgressBar::backgroundColourId, buttonColour);
+    playbackBar.setColour(juce::ProgressBar::foregroundColourId, accentColour);
+    addChildComponent(playbackBar);
 
     setResizable(true, false);
     setResizeLimits(500, 250, 1400, 700);
@@ -324,6 +349,15 @@ void AriaBridgeAudioProcessorEditor::resized()
         { &continuitySlider, &continuityLabel, &continuityValueLabel },
         { &gradeSlider, &gradeLabel, &gradeValueLabel }
     });
+
+    auto progressSection = buttonPanel.removeFromBottom(64).reduced(8, 4);
+    const int halfH = progressSection.getHeight() / 2;
+    const int pLabelH = juce::jmax(11, juce::roundToInt(getHeight() * 0.036f));
+    auto genRow = progressSection.removeFromTop(halfH);
+    generationLabel.setBounds(genRow.removeFromTop(pLabelH));
+    generationBar.setBounds(genRow.withTrimmedTop(2));
+    playbackLabel.setBounds(progressSection.removeFromTop(pLabelH));
+    playbackBar.setBounds(progressSection.withTrimmedTop(2));
 
     auto buttonsArea = buttonPanel.reduced(10, 4);
     std::array<juce::TextButton*, 5> buttons { &recordButton, &syncButton, &commitButton, &playButton, &cancelButton };
@@ -594,4 +628,55 @@ void AriaBridgeAudioProcessorEditor::configureStandaloneWindowIfNeeded()
         window->setConstrainer(&windowConstrainer);
         standaloneWindowConfigured = true;
     }
+}
+
+void AriaBridgeAudioProcessorEditor::setGenerationActive(bool active)
+{
+    generationProgress = -1.0;
+    if (active)
+    {
+        generationElapsedSec = 0;
+        generationLabel.setText("Generating... 0s", juce::dontSendNotification);
+        startTimer(1000);
+    }
+    else
+    {
+        stopTimer();
+    }
+    generationLabel.setVisible(active);
+    generationBar.setVisible(active);
+}
+
+void AriaBridgeAudioProcessorEditor::timerCallback()
+{
+    ++generationElapsedSec;
+    generationLabel.setText("Generating... " + juce::String(generationElapsedSec) + "s",
+                            juce::dontSendNotification);
+}
+
+void AriaBridgeAudioProcessorEditor::setPlaybackDuration(float seconds)
+{
+    playbackTotalDuration = static_cast<double>(seconds);
+}
+
+void AriaBridgeAudioProcessorEditor::setPlaybackProgress(float value)
+{
+    isPlaying = true;
+    playbackProgress = static_cast<double>(value);
+    const double remaining = playbackTotalDuration * (1.0 - static_cast<double>(value));
+    const int s = juce::jmax(0, juce::roundToInt(remaining));
+    playbackLabel.setText(juce::String(s / 60) + ":" + juce::String(s % 60).paddedLeft('0', 2) + " left",
+                          juce::dontSendNotification);
+    playbackLabel.setVisible(true);
+    playbackBar.setVisible(true);
+    playbackBar.repaint();
+}
+
+void AriaBridgeAudioProcessorEditor::stopPlayback()
+{
+    isPlaying = false;
+    playbackProgress = 0.0;
+    playbackTotalDuration = 0.0;
+    playbackLabel.setVisible(false);
+    playbackBar.setVisible(false);
 }

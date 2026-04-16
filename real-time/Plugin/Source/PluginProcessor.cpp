@@ -597,6 +597,69 @@ void AriaBridgeAudioProcessor::handleIncomingOSCMessage(const void* data, size_t
         }
 
         triggerAsyncUpdate();
+        return;
+    }
+
+    if (address == "/generation_start" && typeTags == ",")
+    {
+        juce::MessageManager::callAsync([this]
+        {
+            if (activeEditor != nullptr)
+                activeEditor->setGenerationActive(true);
+        });
+        return;
+    }
+
+    if (address == "/generation_done" && typeTags == ",")
+    {
+        juce::MessageManager::callAsync([this]
+        {
+            if (activeEditor != nullptr)
+                activeEditor->setGenerationActive(false);
+        });
+        return;
+    }
+
+    if (address == "/playback_progress" && typeTags == ",f")
+    {
+        float progressValue = 0.0f;
+
+        if (readFloat32(bytes, sizeInBytes, offset, progressValue))
+        {
+            juce::MessageManager::callAsync([this, progressValue]
+            {
+                if (activeEditor != nullptr)
+                    activeEditor->setPlaybackProgress(progressValue);
+            });
+        }
+
+        return;
+    }
+
+    if (address == "/playback_duration" && typeTags == ",f")
+    {
+        float durationValue = 0.0f;
+
+        if (readFloat32(bytes, sizeInBytes, offset, durationValue))
+        {
+            juce::MessageManager::callAsync([this, durationValue]
+            {
+                if (activeEditor != nullptr)
+                    activeEditor->setPlaybackDuration(durationValue);
+            });
+        }
+
+        return;
+    }
+
+    if (address == "/playback_stopped" && typeTags == ",")
+    {
+        juce::MessageManager::callAsync([this]
+        {
+            if (activeEditor != nullptr)
+                activeEditor->stopPlayback();
+        });
+        return;
     }
 }
 

@@ -30,6 +30,8 @@ class OscController:
         self.commit_cb = commit_cb
         self.grade_cb = grade_cb
         self.feedback_param_cb = feedback_param_cb
+        self.cancel_playback_cb = None
+        self.generation_cancel_cb = None
         self.server = None
         self.client = None
         self.stop_event = threading.Event()
@@ -65,6 +67,7 @@ class OscController:
         disp.map("/aria/min_p", self._handle_min_p)
         disp.map("/aria/tokens", self._handle_tokens)
         disp.map("/aria/cancel", self._handle_cancel)
+        disp.map("/cancel_playback", self._handle_cancel_playback)
         disp.map("/aria/ping", self._handle_ping)
         disp.map("/aria/play", self._handle_play)
         disp.map("/aria/coherence", self._handle_coherence)
@@ -216,6 +219,46 @@ class OscController:
         except Exception:
             logger.debug("Failed to send OSC log")
 
+    def send_playback_duration(self, seconds: float):
+        if not self.client:
+            return
+        try:
+            self.client.send_message("/playback_duration", float(seconds))
+        except Exception:
+            logger.debug("Failed to send /playback_duration")
+
+    def send_generation_start(self):
+        if not self.client:
+            return
+        try:
+            self.client.send_message("/generation_start", [])
+        except Exception:
+            logger.debug("Failed to send /generation_start")
+
+    def send_generation_done(self):
+        if not self.client:
+            return
+        try:
+            self.client.send_message("/generation_done", [])
+        except Exception:
+            logger.debug("Failed to send /generation_done")
+
+    def send_playback_progress(self, value: float):
+        if not self.client:
+            return
+        try:
+            self.client.send_message("/playback_progress", float(value))
+        except Exception:
+            logger.debug("Failed to send /playback_progress")
+
+    def send_playback_stopped(self):
+        if not self.client:
+            return
+        try:
+            self.client.send_message("/playback_stopped", [])
+        except Exception:
+            logger.debug("Failed to send /playback_stopped")
+
     @staticmethod
     def _coerce_flag(val):
         try:
@@ -271,8 +314,21 @@ class OscController:
             self.send_log("Record stop requested (OSC)")
 
     def _handle_cancel(self, addr, *args):
+        logger.info("[OSC] /aria/cancel received")
+        print("[OSC] Cancel received — stopping generation/playback/pending")
+        if self.generation_cancel_cb:
+            self.generation_cancel_cb()
         self.command_queue.put(("cancel", 1))
         self.send_log("Cancel requested (OSC)")
+
+    def _handle_cancel_playback(self, addr, *args):
+        logger.info("[OSC] /cancel_playback received — stopping MIDI feed")
+        print("[OSC] Cancel playback received — stopping MIDI feed")
+        if self.cancel_playback_cb:
+            self.cancel_playback_cb()
+        else:
+            self.command_queue.put(("cancel_playback", None))
+        self.send_log("Playback cancel requested (OSC)")
 
     def _handle_play(self, addr, *args):
         logger.info("[OSC] play -> SEND OUTPUT")

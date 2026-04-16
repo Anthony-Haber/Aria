@@ -24,6 +24,4 @@ if not exist "%~dp0models\model-gen.safetensors" (
   --feedback ^
   --data-dir "C:\Code\Aria Feedback"^
   --checkpoint "%~dp0models\model-gen.safetensors" ^
-  --in "ARIA_IN 3" ^
-  --out "ARIA_OUT 5" ^
   --device "cuda"

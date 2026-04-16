@@ -592,9 +592,17 @@ def main():
                 osc_status_cb=osc.send_status if osc else None,
                 osc_log_cb=osc.send_log if osc else None,
                 osc_params_cb=osc.send_params if osc else None,
+                osc_generation_start_cb=osc.send_generation_start if osc else None,
+                osc_generation_done_cb=osc.send_generation_done if osc else None,
+                osc_playback_progress_cb=osc.send_playback_progress if osc else None,
+                osc_playback_stopped_cb=osc.send_playback_stopped if osc else None,
+                osc_playback_duration_cb=osc.send_playback_duration if osc else None,
                 play_gate=bool(args.m4l),
                 feedback_manager=feedback_manager,
             )
+            if osc:
+                osc.cancel_playback_cb = session.playback_cancel_event.set
+                osc.generation_cancel_cb = session.generation_cancel_event.set
             if args.ui:
                 session_thread = threading.Thread(target=session.run, daemon=True)
                 session_thread.start()
