@@ -7,8 +7,6 @@ ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 PYTHON="$ROOT/venv/bin/python"
 BACKEND="$ROOT/backend"
 MODEL="$ROOT/models/model-gen.safetensors"
-DATA_DIR="$ROOT/data"
-
 if [ ! -f "$PYTHON" ]; then
     osascript -e 'display dialog "Virtual environment not found.\nPlease run install.sh first." buttons {"OK"} default button "OK" with icon stop'
     exit 1
@@ -23,5 +21,4 @@ cd "$BACKEND"
 "$PYTHON" ableton_bridge.py \
   plugin \
   --feedback \
-  --data-dir "$DATA_DIR" \
   --checkpoint "$MODEL"

@@ -1,74 +1,159 @@
 # Aria Bridge
 
-Aria Bridge is a real-time generative MIDI system that connects the Aria music language model to any DAW via loopMIDI, controlled through a standalone desktop application.
+Aria Bridge connects an AI music model to your DAW in real time. You play a few bars into it, it generates a continuation, and plays it back through a virtual MIDI port — all without leaving your session.
 
-## Launcher (Recommended)
-
-The easiest way to run Aria Bridge:
-
-1. Install Node.js (https://nodejs.org)
-2. Run `cd front-end && npm install`
-3. Run `npm start`
-4. Select your mode and follow the on-screen instructions
-
-No terminal knowledge required.
+Supported platforms: **Windows 10/11** and **macOS** (Apple Silicon and Intel).
 
 ---
 
-## Requirements
+## What You Need Before Starting
 
-- Windows 10/11 64-bit
-- NVIDIA GPU recommended (CUDA 12.1) for real-time performance
-- CPU inference supported but slower
-- loopMIDI (free) for virtual MIDI ports
-- Ableton Live, Reaper, or any DAW that supports loopMIDI
+- Ableton Live, Reaper, or any DAW that supports virtual MIDI ports
+- An NVIDIA GPU (Windows) or Apple Silicon Mac is recommended for fast generation — CPU and Intel Mac work but are slower
+- About 10–15 minutes for a first-time setup
 
-## Installation
+---
 
-1. Download the latest release zip from the Releases page.
-2. Unzip to a permanent location, for example `C:\Aria Bridge\`.
-3. Run `install.bat` to install Python 3.11 and all dependencies.
-4. Download the Aria model from HuggingFace:
-   `https://huggingface.co/loubb/aria-medium-base/resolve/main/model-gen.safetensors?download=true`
-   File needed: `model-gen.safetensors` or any equivalent model
-5. Place `model-gen.safetensors` in the `models\` folder.
-6. Install loopMIDI:
-   `https://www.tobias-erichsen.de/software/loopmidi.html`
-7. In loopMIDI, create two ports named exactly: `ARIA_IN` and `ARIA_OUT`.
+## Step 1 — Download Aria Bridge
 
-## Running
+Go to the [Releases page](../../releases) and download the latest zip for your platform:
 
-1. Open `Aria Bridge.exe`.
-2. The backend starts automatically. Status shows `IDLE` when ready.
-3. In your DAW, route a MIDI track output to `ARIA_IN`.
-4. Route a second MIDI track input from `ARIA_OUT` to an instrument.
+- **Windows:** `AriaBridge-vX.X.X-windows.zip`
+- **macOS:** `AriaBridge-vX.X.X-macos.zip`
 
-## Controls
+Unzip it to a permanent folder — for example `C:\Aria Bridge\` on Windows or `~/Aria Bridge/` on Mac.
 
-- `temp` / `top_p` / `min_p` / `tokens`: generation parameters
-- `record`: start/stop recording your MIDI input
-- `play`: play back the generated output once it is ready
-- `cancel`: stops whatever is currently happening — cancels an active recording, interrupts generation mid-way, stops playback, or discards a pending output and returns to the record prompt
-- `commit`: save the current generation with feedback ratings
-- `sync`: resync all parameters to the backend
-- `coherence` / `taste` / `repetition` / `continuity` / `grade`: rate the generation (1-5) before committing
+> Do not run it from your Downloads folder. Keep it somewhere stable.
 
-## Progress Display
+---
 
-Two progress indicators appear in the plugin during activity:
+## Step 2 — Download the AI Model
 
-- **Generating bar**: shown while the model is running, displaying elapsed seconds. Pressing cancel interrupts generation immediately.
-- **Playback bar**: shown during MIDI playback with a `M:SS left` countdown. Pressing cancel stops the MIDI feed.
+The model file is not included because of its size. You need to download it once.
 
-## Feedback Data
+1. Download: [model-gen.safetensors](https://huggingface.co/loubb/aria-medium-base/resolve/main/model-gen.safetensors)
+2. Place it inside the `models` folder in your Aria Bridge folder
 
-Committed episodes are saved to the `data\` folder alongside the exe. Each episode contains `prompt.mid`, `output.mid`, and `meta.json`.
+```
+Aria Bridge/
+  models/
+    model-gen.safetensors   ← goes here
+```
+
+---
+
+## Step 3 — Install Dependencies
+
+### Windows
+
+Double-click **install.bat** inside your Aria Bridge folder. It will set up Python and all required packages automatically. This takes a few minutes the first time.
+
+### macOS
+
+1. Open **Terminal** (search for it in Spotlight)
+2. Drag **install.sh** from your Aria Bridge folder into the Terminal window and press Enter
+3. If macOS asks permission to run it, type your password and press Enter
+
+> On Apple Silicon (M1/M2/M3), generation uses MLX and is very fast. On Intel Mac, it runs on CPU and will be slower.
+
+---
+
+## Step 4 — Set Up Virtual MIDI Ports
+
+Aria Bridge talks to your DAW through virtual MIDI cables.
+
+### Windows — loopMIDI
+
+1. Download loopMIDI (free): [tobias-erichsen.de/software/loopmidi.html](https://www.tobias-erichsen.de/software/loopmidi.html)
+2. Install and open it
+3. Create two ports with these exact names:
+   - `ARIA_IN`
+   - `ARIA_OUT`
+
+> loopMIDI must be running every time you use Aria Bridge. You can set it to launch on startup in its settings.
+
+### macOS — IAC Driver (built in)
+
+macOS has a virtual MIDI system built in — no extra download needed.
+
+1. Open **Audio MIDI Setup** (search in Spotlight)
+2. Go to **Window → Show MIDI Studio**
+3. Double-click **IAC Driver**
+4. Check **Device is online**
+5. Add two ports named exactly:
+   - `ARIA_IN`
+   - `ARIA_OUT`
+
+---
+
+## Step 5 — Route MIDI in Your DAW
+
+You need two MIDI tracks:
+
+| Track | Purpose | MIDI Output / Input |
+|---|---|---|
+| Track 1 | Your instrument (what you play) | Output → `ARIA_IN` |
+| Track 2 | Aria's output (what it generates) | Input → `ARIA_OUT` |
+
+Put an instrument on Track 2 so you can hear Aria's output.
+
+---
+
+## Step 6 — Launch Aria Bridge
+
+### Windows
+
+Double-click **AriaLauncher.exe**. A small window appears — select your mode:
+
+- **M4L Device** — use this if you are running the included Max for Live device inside Ableton
+- **Plugin (VST3 / Standalone)** — use this for the VST3 plugin in any DAW, or the standalone window
+
+When the status dot turns green and says **Ready**, Aria Bridge is connected.
+
+### macOS
+
+Double-click **Aria Bridge.app**. The app opens and the backend starts automatically in the background. When the status shows **IDLE**, it is ready.
+
+---
+
+## Using Aria Bridge
+
+| Control | What it does |
+|---|---|
+| `record` | Start / stop recording your MIDI input |
+| `play` | Play back the generated output |
+| `cancel` | Stop whatever is happening — cancels recording, interrupts generation, stops playback, or discards a pending output and returns to record |
+| `commit` | Save this generation with your ratings |
+| `sync` | Re-send all parameter values to the backend |
+| `temp` | Temperature — higher = more surprising, lower = more conservative |
+| `top_p` / `min_p` | Sampling filters — leave at defaults to start |
+| `tokens` | How many tokens to generate — more = longer output |
+| `coherence` / `taste` / `repetition` / `continuity` / `grade` | Rate the generation 1–5 before committing |
+
+**Basic workflow:**
+1. Hit `record` and play something on your MIDI track
+2. Hit `record` again to stop — generation starts automatically
+3. A timer shows while the model is running
+4. When ready, hit `play` to hear the result
+5. If you like it, rate it and hit `commit`
+
+---
 
 ## Troubleshooting
 
-- Status shows `DISCONNECTED`: make sure `install.bat` completed successfully and `start.bat` is next to the exe.
-- No MIDI captured: check loopMIDI ports are named `ARIA_IN` / `ARIA_OUT` and your DAW track is routed correctly.
-- Generation is slow: ensure PyTorch CUDA is installed and your GPU is recognized. `install.bat` handles this automatically.
+**Status shows DISCONNECTED**
+The backend did not start. On Windows, make sure `aria_backend.exe` is in the same folder as `AriaLauncher.exe`. On Mac, make sure you ran `install.sh` successfully.
+
+**No MIDI is being captured**
+Check that your virtual MIDI ports exist and are named exactly `ARIA_IN` and `ARIA_OUT`. On Windows, make sure loopMIDI is running. Check your DAW track routing.
+
+**Generation is very slow**
+On Windows, make sure you have an NVIDIA GPU with up-to-date drivers. On Mac, this is expected on Intel — Apple Silicon is significantly faster.
+
+**The model file is not found**
+Make sure `model-gen.safetensors` is inside the `models` folder and has not been renamed.
+
+---
 
 ## License
 
