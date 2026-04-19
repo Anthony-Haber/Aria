@@ -31,7 +31,7 @@ Unzip it to a permanent folder — for example `C:\Aria Bridge\` on Windows or `
 
 The Windows backend (`aria_backend.exe`) is too large to include in the release zip. You need to download it separately.
 
-1. Go to the [Aria Bridge releases on HuggingFace](https://huggingface.co/Habanero12/Aria_Bridge_releases/tree/main)
+1. Go to the [Aria Bridge releases on HuggingFace](https://huggingface.co/Anthony-Haber/Aria_Bridge_releases/tree/main)
 2. Download **`aria_backend.exe`**
 3. Place it directly inside your Aria Bridge folder, next to `AriaLauncher.exe`
 
