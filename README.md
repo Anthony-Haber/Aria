@@ -27,7 +27,27 @@ Unzip it to a permanent folder — for example `C:\Aria Bridge\` on Windows or `
 
 ---
 
-## Step 2 — Download the AI Model
+## Step 2 — Download the Python Backend (Windows only)
+
+The Windows backend (`aria_backend.exe`) is too large to include in the release zip. You need to download it separately.
+
+1. Go to the [Aria Bridge releases on HuggingFace](https://huggingface.co/Habanero12/Aria_Bridge_releases/tree/main)
+2. Download **`aria_backend.exe`**
+3. Place it directly inside your Aria Bridge folder, next to `AriaLauncher.exe`
+
+```
+Aria Bridge/
+  AriaLauncher.exe
+  aria_backend.exe   ← goes here
+  models/
+  ...
+```
+
+> macOS users can skip this step — the backend is already included in the Mac zip.
+
+---
+
+## Step 3 — Download the AI Model
 
 The model file is not included because of its size. You need to download it once.
 
@@ -39,22 +59,6 @@ Aria Bridge/
   models/
     model-gen.safetensors   ← goes here
 ```
-
----
-
-## Step 3 — Install Dependencies
-
-### Windows
-
-Double-click **install.bat** inside your Aria Bridge folder. It will set up Python and all required packages automatically. This takes a few minutes the first time.
-
-### macOS
-
-1. Open **Terminal** (search for it in Spotlight)
-2. Drag **install.sh** from your Aria Bridge folder into the Terminal window and press Enter
-3. If macOS asks permission to run it, type your password and press Enter
-
-> On Apple Silicon (M1/M2/M3), generation uses MLX and is very fast. On Intel Mac, it runs on CPU and will be slower.
 
 ---
 
@@ -142,7 +146,7 @@ Double-click **Aria Bridge.app**. The app opens and the backend starts automatic
 ## Troubleshooting
 
 **Status shows DISCONNECTED**
-The backend did not start. On Windows, make sure `aria_backend.exe` is in the same folder as `AriaLauncher.exe`. On Mac, make sure you ran `install.sh` successfully.
+The backend did not start. On Windows, make sure `aria_backend.exe` is downloaded from HuggingFace and placed in the same folder as `AriaLauncher.exe` (see Step 2). On Mac, make sure the backend binary is present inside the app bundle.
 
 **No MIDI is being captured**
 Check that your virtual MIDI ports exist and are named exactly `ARIA_IN` and `ARIA_OUT`. On Windows, make sure loopMIDI is running. Check your DAW track routing.
