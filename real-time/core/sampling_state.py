@@ -3,7 +3,7 @@
 import threading
 
 
-class SamplingState:
+class SamplingState: # tracks the temp, minp top p values. 
     """Holds temperature, top_p, min_p with thread-safe getters/setters."""
 
     def __init__(self, temperature: float, top_p: float, min_p: float | None):
@@ -67,7 +67,7 @@ class SamplingState:
             return self.min_p
 
 
-class SessionState:
+class SessionState: # tracks what is happening in the current session like recording status, last output etc. 
     """Thread-safe session status and last output path."""
 
     def __init__(self, mode: str = "manual"):
