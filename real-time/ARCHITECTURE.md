@@ -173,7 +173,7 @@ max_new_tokens = min(512, int(horizon_s * 200))
 max_new_tokens = min(8096 - len(prompt), max_new_tokens)
 ```
 
-Token budget: cap at 512, also ensure prompt + generation fits the 8096-token context window. `horizon_s * 200` is a rough conversion — about 200 tokens per second of music.
+Token budget: cap at 512, also ensure prompt + generation fits within the model's 8192-token context window (the code uses 8096 as a conservative cap). `horizon_s * 200` is a rough conversion, about 200 tokens per second of music.
 
 **Sampling:**
 ```python
